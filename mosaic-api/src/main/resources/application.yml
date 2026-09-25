@@ -1,0 +1,61 @@
+server:
+  port: ${SERVER_PORT:18080}
+  shutdown: graceful
+
+spring:
+  application:
+    name: mosaic-api
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:15432/pics2text}
+    username: ${DB_USERNAME:pics2text}
+    password: ${DB_PASSWORD:pics2text_dev}
+    hikari:
+      maximum-pool-size: ${DB_POOL_MAX_SIZE:20}
+      minimum-idle: ${DB_POOL_MIN_IDLE:2}
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:16379}
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:pics2text}
+    password: ${RABBITMQ_PASSWORD:pics2text_dev}
+    publisher-confirm-type: correlated
+    publisher-returns: true
+  flyway:
+    enabled: true
+    validate-migration-naming: true
+
+mybatis-plus:
+  mapper-locations: classpath*:/mapper/**/*.xml
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    banner: false
+
+sa-token:
+  token-name: pics2text-token
+  timeout: 2592000
+  active-timeout: 1800
+  is-concurrent: true
+  is-share: false
+  token-style: uuid
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: when-authorized
+
+logging:
+  structured:
+    format:
+      console: logstash

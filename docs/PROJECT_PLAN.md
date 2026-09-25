@@ -73,7 +73,7 @@ mosaic-platform/
 | 数据库 | PostgreSQL、Flyway、HikariCP |
 | 缓存 | Redis |
 | 消息队列 | RabbitMQ Quorum Queue |
-| 文件存储 | S3 兼容对象存储，开发环境使用 MinIO |
+| 文件存储 | S3 兼容对象存储，开发环境使用 SeaweedFS |
 | 图片分析 | OpenCV、Java2D，必要时引入 ONNX Runtime |
 | 图片渲染 | libvips、LittleCMS/ICC |
 | 前端 | React、TypeScript、Vite、Ant Design |
@@ -151,7 +151,7 @@ mosaic-platform/
 - 创建 API、Analysis Worker、Render Worker 三个启动模块；
 - 接入统一异常、错误码、请求 ID 和结构化日志；
 - 配置代码格式、静态检查和 ArchUnit 架构测试；
-- 创建 PostgreSQL、Redis、RabbitMQ、MinIO 的本地 Docker Compose；
+- 创建 PostgreSQL、Redis、RabbitMQ、SeaweedFS 的本地 Docker Compose；
 - 接入 Flyway 和第一份数据库迁移；
 - 建立单元测试、集成测试和 CI 命令；
 - 编写本地开发环境启动说明。
@@ -198,7 +198,7 @@ mosaic-platform/
 
 - 项目生命周期和基础配置；
 - 照片元数据、授权状态和审核状态；
-- S3/MinIO预签名上传；
+- S3兼容对象存储预签名上传；
 - 分片上传、完成确认和失败清理；
 - 文件格式、魔数、大小和分辨率校验；
 - SHA-256完全重复检测；
@@ -529,4 +529,3 @@ P05可在P04开发期间并行进行。P08可以在P07后半段并行。P11的�
 - 可接受的排版耗时和最终渲染耗时。
 
 这些信息不会阻塞P00工程搭建，但必须在对应业务阶段开始前确认并记录到阶段文档。
-

@@ -2,7 +2,7 @@
 
 将大量照片自动排版为指定文字，并支持曲面载体预览及超大印刷文件输出的平台。
 
-项目当前处于规划阶段。
+P00 工程基础已经完成，下一阶段为 P01 身份认证与项目权限。代码采用模块化单体架构，计算密集型任务通过独立 Worker 进程运行；在业务边界和容量要求尚未稳定前不拆分微服务。
 
 ## 项目文档
 
@@ -19,7 +19,67 @@
 - PostgreSQL
 - Redis
 - RabbitMQ
-- S3 兼容对象存储（开发环境使用 MinIO）
+- S3 兼容对象存储（开发环境使用 SeaweedFS）
 - OpenCV + libvips
 - React + TypeScript + PixiJS + Three.js
 
+## 工程模块
+
+| 模块 | 职责 |
+|---|---|
+| `mosaic-shared-kernel` | 跨领域共享的最小类型与领域事件契约 |
+| `mosaic-identity` | 身份、认证和权限领域 |
+| `mosaic-project` | 项目与项目成员领域 |
+| `mosaic-photoasset` | 照片资产、上传和分析元数据领域 |
+| `mosaic-layout` | 文字蒙版、网格、分配和布局领域 |
+| `mosaic-surface` | 曲面载体与坐标映射领域 |
+| `mosaic-rendering` | 高清渲染和印刷交付领域 |
+| `mosaic-api` | HTTP API、认证入口和数据库迁移 |
+| `mosaic-analysis-worker` | 照片分析与布局计算进程 |
+| `mosaic-render-worker` | 高清渲染进程 |
+
+每个业务模块后续在内部按 `domain`、`application`、`infrastructure`、`interfaces` 分层。领域层不得依赖基础设施层或接口层，该约束由 ArchUnit 测试持续校验。
+
+## 本地开发
+
+前置要求：JDK 21、Docker Desktop 或兼容的 Docker Compose 环境。项目内置 Maven Wrapper，会自动使用 Maven 3.9.16。
+
+```bash
+cp .env.example .env
+docker compose up -d
+./mvnw --batch-mode --no-transfer-progress verify
+```
+
+`.env` 仅用于本地覆盖默认配置，不应提交到 Git。默认值均为开发环境凭据，不能用于生产环境。
+
+启动三个 Java 进程：
+
+```bash
+make api
+make analysis-worker
+make render-worker
+```
+
+默认服务地址：
+
+| 服务 | 地址 |
+|---|---|
+| API 健康检查 | `http://localhost:18080/actuator/health` |
+| Analysis Worker 健康检查 | `http://localhost:18081/actuator/health` |
+| Render Worker 健康检查 | `http://localhost:18082/actuator/health` |
+| PostgreSQL | `localhost:15432` |
+| Redis | `localhost:16379` |
+| RabbitMQ 管理台 | `http://localhost:15672` |
+| S3 兼容对象存储 | `http://localhost:19000` |
+
+常用命令：
+
+```bash
+make infra-status
+make verify
+make infra-down
+```
+
+## 配置约定
+
+Java 应用可通过环境变量覆盖默认连接信息，例如 `DB_URL`、`DB_USERNAME`、`DB_PASSWORD`、`REDIS_HOST`、`REDIS_PORT`、`RABBITMQ_HOST`、`RABBITMQ_PORT`、`RABBITMQ_USERNAME` 和 `RABBITMQ_PASSWORD`。生产环境必须由密钥管理系统注入凭据。

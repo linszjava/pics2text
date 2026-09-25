@@ -1,0 +1,31 @@
+server:
+  port: ${SERVER_PORT:18082}
+  shutdown: graceful
+
+spring:
+  application:
+    name: mosaic-render-worker
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:15432/pics2text}
+    username: ${DB_USERNAME:pics2text}
+    password: ${DB_PASSWORD:pics2text_dev}
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:pics2text}
+    password: ${RABBITMQ_PASSWORD:pics2text_dev}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+logging:
+  structured:
+    format:
+      console: logstash
