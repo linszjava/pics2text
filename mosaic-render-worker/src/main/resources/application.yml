@@ -14,6 +14,27 @@ spring:
     port: ${RABBITMQ_PORT:5672}
     username: ${RABBITMQ_USERNAME:pics2text}
     password: ${RABBITMQ_PASSWORD:pics2text_dev}
+    listener:
+      simple:
+        acknowledge-mode: manual
+        prefetch: ${JOB_WORKER_PREFETCH:2}
+
+jobs:
+  worker:
+    enabled: true
+    queue: mosaic.jobs.render.q
+    consumer-name: mosaic-render-worker
+    id: ${JOB_WORKER_ID:${spring.application.name}}
+  retry:
+    base-delay: ${JOB_RETRY_BASE_DELAY:5s}
+    max-delay: ${JOB_RETRY_MAX_DELAY:5m}
+
+mybatis-plus:
+  type-handlers-package: com.pics2text.job.infrastructure.persistence
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    banner: false
 
 management:
   endpoints:

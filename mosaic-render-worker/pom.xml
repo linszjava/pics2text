@@ -12,6 +12,11 @@
     <dependencies>
         <dependency>
             <groupId>com.pics2text</groupId>
+            <artifactId>mosaic-job</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.pics2text</groupId>
             <artifactId>mosaic-rendering</artifactId>
             <version>${project.version}</version>
         </dependency>

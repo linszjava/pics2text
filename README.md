@@ -2,7 +2,7 @@
 
 将大量照片自动排版为指定文字，并支持曲面载体预览及超大印刷文件输出的平台。
 
-P00 工程基础、P01 身份认证与项目权限、P02 项目与照片上传已经完成，下一阶段为 P03 异步任务与可靠消息。代码采用模块化单体架构，计算密集型任务通过独立 Worker 进程运行；在业务边界和容量要求尚未稳定前不拆分微服务。
+P00 工程基础、P01 身份认证与项目权限、P02 项目与照片上传、P03 异步任务与可靠消息已经完成，下一阶段为 P04 照片分析与审核。代码采用模块化单体架构，计算密集型任务通过独立 Worker 进程运行；在业务边界和容量要求尚未稳定前不拆分微服务。
 
 ## 项目文档
 
@@ -31,6 +31,7 @@ P00 工程基础、P01 身份认证与项目权限、P02 项目与照片上传�
 | `mosaic-identity` | 身份、认证和权限领域 |
 | `mosaic-project` | 项目与项目成员领域 |
 | `mosaic-photoasset` | 照片资产、上传和分析元数据领域 |
+| `mosaic-job` | 统一作业状态机、Outbox、RabbitMQ 拓扑、幂等消费与超时恢复 |
 | `mosaic-layout` | 文字蒙版、网格、分配和布局领域 |
 | `mosaic-surface` | 曲面载体与坐标映射领域 |
 | `mosaic-rendering` | 高清渲染和印刷交付领域 |
@@ -85,6 +86,8 @@ make infra-down
 Java 应用可通过环境变量覆盖默认连接信息，例如 `DB_URL`、`DB_USERNAME`、`DB_PASSWORD`、`REDIS_HOST`、`REDIS_PORT`、`RABBITMQ_HOST`、`RABBITMQ_PORT`、`S3_ENDPOINT`、`S3_PUBLIC_ENDPOINT`、`S3_ACCESS_KEY` 和 `S3_SECRET_KEY`。生产环境必须由密钥管理系统注入凭据，对象桶必须保持私有。
 
 照片上传使用 S3 预签名 URL：先调用上传初始化接口，小文件直接 PUT 到返回 URL；大文件逐片获取 URL 并上传，最后把分片 ETag 清单提交到完成接口。API 会重新校验实际 SHA-256、大小、魔数和图片尺寸，验真通过后照片才进入 `AVAILABLE`。完整契约见 [OpenAPI 说明](docs/api/openapi.yaml)。
+
+异步作业通过数据库事务同时写入 `processing_job` 与 `outbox_event`，发布器收到 RabbitMQ Publisher Confirm 后才将事件标记为已发布。Worker 使用手动 ACK、消费幂等记录、有限指数退避、专用重试队列和死信队列；API 负责心跳超时接管，并通过 SSE 推送进度。业务代码通过 `JobCoordinator` 创建作业，Worker 通过 `JobHandler` 扩展具体算法。
 
 ## 首次管理员初始化
 

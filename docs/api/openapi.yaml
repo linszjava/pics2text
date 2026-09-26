@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: Pics2Text API
   version: 0.1.0
-  description: Pics2Text 身份认证、项目管理与照片直传 API。
+  description: Pics2Text 身份认证、项目管理、照片直传与异步作业 API。
 servers:
   - url: http://localhost:18080
     description: 本地开发环境
@@ -11,6 +11,7 @@ tags:
   - name: Users
   - name: Projects
   - name: Photos
+  - name: Jobs
   - name: Audit
 paths:
   /api/v1/auth/bootstrap:
@@ -381,6 +382,71 @@ paths:
       parameters: [{ $ref: '#/components/parameters/ProjectId' }, { $ref: '#/components/parameters/PhotoId' }]
       responses:
         '200': { description: 已撤回, content: { application/json: { schema: { $ref: '#/components/schemas/Photo' } } } }
+  /api/v1/projects/{projectId}/jobs:
+    get:
+      tags: [Jobs]
+      summary: 分页查询项目作业
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/ProjectId' }
+        - { in: query, name: page, schema: { type: integer, minimum: 0, default: 0 } }
+        - { in: query, name: size, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        '200': { description: 作业列表, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Job' } } } } }
+  /api/v1/projects/{projectId}/jobs/{jobId}:
+    get:
+      tags: [Jobs]
+      summary: 查询作业详情
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/ProjectId' }, { $ref: '#/components/parameters/JobId' }]
+      responses:
+        '200': { description: 作业详情, content: { application/json: { schema: { $ref: '#/components/schemas/Job' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/projects/{projectId}/jobs/{jobId}/cancel:
+    post:
+      tags: [Jobs]
+      summary: 请求取消作业
+      description: 等待或重试中的作业立即取消；运行中的作业在下一个安全检查点取消；不可取消阶段返回冲突。
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/ProjectId' }, { $ref: '#/components/parameters/JobId' }]
+      responses:
+        '200': { description: 取消请求已接受, content: { application/json: { schema: { $ref: '#/components/schemas/Job' } } } }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/projects/{projectId}/jobs/{jobId}/retry:
+    post:
+      tags: [Jobs]
+      summary: 人工重新执行终态作业
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/ProjectId' }, { $ref: '#/components/parameters/JobId' }]
+      responses:
+        '200': { description: 已重新排队, content: { application/json: { schema: { $ref: '#/components/schemas/Job' } } } }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/projects/{projectId}/jobs/events:
+    get:
+      tags: [Jobs]
+      summary: 订阅项目作业进度
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/ProjectId' }]
+      responses:
+        '200':
+          description: connected 与 job-updated 事件流
+          content:
+            text/event-stream:
+              schema: { type: string }
+  /api/v1/projects/{projectId}/jobs/probes:
+    post:
+      tags: [Jobs]
+      summary: 创建基础设施验收探针作业
+      description: 仅用于运维验收和故障演练，需要项目管理权限。
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/ProjectId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProbeJobRequest' }
+      responses:
+        '201': { description: 探针已创建, content: { application/json: { schema: { $ref: '#/components/schemas/Job' } } } }
   /api/v1/admin/audit-logs:
     get:
       tags: [Audit]
@@ -414,6 +480,11 @@ components:
     PhotoId:
       in: path
       name: photoId
+      required: true
+      schema: { type: string, format: uuid }
+    JobId:
+      in: path
+      name: jobId
       required: true
       schema: { type: string, format: uuid }
   responses:
@@ -601,6 +672,39 @@ components:
         success: { type: boolean }
         requestId: { type: [string, 'null'] }
         createdAt: { type: string, format: date-time }
+    ProbeJobRequest:
+      type: object
+      required: [failUntilAttempt, durationMillis, maxAttempts]
+      properties:
+        failUntilAttempt: { type: integer, minimum: 0, maximum: 20 }
+        durationMillis: { type: integer, format: int64, minimum: 0, maximum: 60000 }
+        maxAttempts: { type: integer, minimum: 1, maximum: 20 }
+    JobStatus:
+      type: string
+      enum: [PENDING, RUNNING, RETRY_WAIT, CANCELLATION_REQUESTED, SUCCEEDED, FAILED, DEAD_LETTERED, CANCELLED]
+    Job:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        projectId: { type: string, format: uuid }
+        resourceType: { type: [string, 'null'] }
+        resourceId: { type: [string, 'null'], format: uuid }
+        type: { type: string, enum: [PHOTO_ANALYSIS, LAYOUT_GENERATION, PRINT_RENDER, INFRASTRUCTURE_PROBE] }
+        status: { $ref: '#/components/schemas/JobStatus' }
+        progress: { type: integer, minimum: 0, maximum: 100 }
+        currentAttempt: { type: integer, minimum: 0 }
+        maxAttempts: { type: integer, minimum: 1 }
+        nextAttemptAt: { type: [string, 'null'], format: date-time }
+        heartbeatAt: { type: [string, 'null'], format: date-time }
+        startedAt: { type: [string, 'null'], format: date-time }
+        completedAt: { type: [string, 'null'], format: date-time }
+        cancellationRequestedAt: { type: [string, 'null'], format: date-time }
+        cancellable: { type: boolean }
+        resultJson: { type: [string, 'null'] }
+        errorCode: { type: [string, 'null'] }
+        errorMessage: { type: [string, 'null'] }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
     ApiError:
       type: object
       required: [code, message, timestamp, violations]

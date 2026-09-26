@@ -31,7 +31,7 @@ spring:
 
 mybatis-plus:
   mapper-locations: classpath*:/mapper/**/*.xml
-  type-handlers-package: com.pics2text.api.infrastructure.mybatis
+  type-handlers-package: com.pics2text.job.infrastructure.persistence
   configuration:
     map-underscore-to-camel-case: true
   global-config:
@@ -66,6 +66,25 @@ object-storage:
   multipart-part-size: ${S3_MULTIPART_PART_SIZE:8388608}
   verification-buffer-size: ${PHOTO_VERIFICATION_BUFFER_SIZE:2097152}
   cleanup-interval: ${PHOTO_CLEANUP_INTERVAL:1h}
+
+jobs:
+  publisher:
+    enabled: true
+    interval: ${JOB_OUTBOX_INTERVAL:1000}
+    batch-size: ${JOB_OUTBOX_BATCH_SIZE:50}
+    claim-timeout: ${JOB_OUTBOX_CLAIM_TIMEOUT:1m}
+    confirm-timeout: ${JOB_PUBLISH_CONFIRM_TIMEOUT:10s}
+    max-attempts: ${JOB_PUBLISH_MAX_ATTEMPTS:10}
+  recovery:
+    enabled: true
+    interval: ${JOB_RECOVERY_INTERVAL:30000}
+    heartbeat-timeout: ${JOB_HEARTBEAT_TIMEOUT:2m}
+    batch-size: ${JOB_RECOVERY_BATCH_SIZE:50}
+  retry:
+    base-delay: ${JOB_RETRY_BASE_DELAY:5s}
+    max-delay: ${JOB_RETRY_MAX_DELAY:5m}
+  sse:
+    poll-interval: ${JOB_SSE_POLL_INTERVAL:1000}
 
 management:
   endpoints:

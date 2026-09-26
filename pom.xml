@@ -24,6 +24,7 @@
         <module>mosaic-identity</module>
         <module>mosaic-project</module>
         <module>mosaic-photoasset</module>
+        <module>mosaic-job</module>
         <module>mosaic-layout</module>
         <module>mosaic-surface</module>
         <module>mosaic-rendering</module>
