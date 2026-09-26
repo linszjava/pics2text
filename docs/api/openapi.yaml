@@ -1,0 +1,387 @@
+openapi: 3.1.0
+info:
+  title: Pics2Text API
+  version: 0.1.0
+  description: Pics2Text 身份认证、用户管理和项目成员权限 API。
+servers:
+  - url: http://localhost:18080
+    description: 本地开发环境
+tags:
+  - name: Authentication
+  - name: Users
+  - name: Projects
+  - name: Audit
+paths:
+  /api/v1/auth/bootstrap:
+    post:
+      tags: [Authentication]
+      summary: 首次创建系统管理员
+      description: 只允许成功调用一次。部署环境必须通过 IDENTITY_BOOTSTRAP_TOKEN 设置高强度初始化凭据。
+      parameters:
+        - in: header
+          name: X-Bootstrap-Token
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BootstrapRequest' }
+      responses:
+        '201':
+          description: 管理员创建成功
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/auth/login:
+    post:
+      tags: [Authentication]
+      summary: 登录
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: 登录成功
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Session' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429':
+          description: 登录失败次数过多
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+  /api/v1/auth/logout:
+    post:
+      tags: [Authentication]
+      summary: 退出当前会话
+      security: [{ bearerAuth: [] }]
+      responses:
+        '204': { description: 已退出 }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/v1/auth/refresh:
+    post:
+      tags: [Authentication]
+      summary: 续期当前会话
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: 续期成功
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Session' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/v1/auth/me:
+    get:
+      tags: [Authentication]
+      summary: 获取当前用户
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: 当前用户
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/v1/admin/users:
+    get:
+      tags: [Users]
+      summary: 查询用户
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: 用户列表，最多返回 200 条
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/User' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Users]
+      summary: 创建用户
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateUserRequest' }
+      responses:
+        '201':
+          description: 用户创建成功
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/admin/users/{userId}/status:
+    patch:
+      tags: [Users]
+      summary: 启用或停用用户
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { $ref: '#/components/schemas/UserStatus' }
+      responses:
+        '200':
+          description: 状态更新成功
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/admin/users/{userId}/kick:
+    post:
+      tags: [Users]
+      summary: 强制用户全部会话下线
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+      responses:
+        '204': { description: 已踢出 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/projects:
+    post:
+      tags: [Projects]
+      summary: 创建项目权限载体
+      description: P01 仅提供项目成员授权所需的最小项目模型，项目生命周期将在 P02 扩展。
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 120 }
+      responses:
+        '201':
+          description: 项目创建成功
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Project' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/projects/{projectId}:
+    get:
+      tags: [Projects]
+      summary: 查询有权访问的项目
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: 项目信息
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Project' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/projects/{projectId}/members:
+    get:
+      tags: [Projects]
+      summary: 查询项目成员
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: 项目成员列表
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ProjectMember' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/projects/{projectId}/members/{userId}:
+    put:
+      tags: [Projects]
+      summary: 新增成员或修改项目角色
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/UserId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                role: { $ref: '#/components/schemas/ProjectRole' }
+      responses:
+        '200':
+          description: 成员保存成功
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProjectMember' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    delete:
+      tags: [Projects]
+      summary: 移除项目成员
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/UserId'
+      responses:
+        '204': { description: 已移除 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/admin/audit-logs:
+    get:
+      tags: [Audit]
+      summary: 查询最近审计记录
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: 最近 200 条审计记录，不返回 IP 和内部详情
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/AuditLog' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  parameters:
+    UserId:
+      in: path
+      name: userId
+      required: true
+      schema: { type: string, format: uuid }
+    ProjectId:
+      in: path
+      name: projectId
+      required: true
+      schema: { type: string, format: uuid }
+  responses:
+    Unauthorized:
+      description: 未登录、Token 失效、已退出或已被踢出
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+    Forbidden:
+      description: 功能权限或项目级权限不足
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+    Conflict:
+      description: 数据状态冲突
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+    NotFound:
+      description: 资源不存在
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+  schemas:
+    BootstrapRequest:
+      type: object
+      required: [username, password, displayName]
+      properties:
+        username: { type: string, minLength: 3, maxLength: 64 }
+        password: { type: string, format: password, minLength: 12, maxLength: 128 }
+        displayName: { type: string, minLength: 1, maxLength: 100 }
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string, maxLength: 64 }
+        password: { type: string, format: password, maxLength: 128 }
+    CreateUserRequest:
+      type: object
+      required: [username, password, displayName, globalRole]
+      properties:
+        username: { type: string, minLength: 3, maxLength: 64 }
+        password: { type: string, format: password, minLength: 12, maxLength: 128 }
+        displayName: { type: string, minLength: 1, maxLength: 100 }
+        globalRole: { $ref: '#/components/schemas/GlobalRole' }
+    Session:
+      type: object
+      required: [tokenName, tokenValue, tokenTimeout, activeTimeout, user]
+      properties:
+        tokenName: { type: string, example: Authorization }
+        tokenValue: { type: string }
+        tokenTimeout: { type: integer, format: int64 }
+        activeTimeout: { type: integer, format: int64 }
+        user: { $ref: '#/components/schemas/User' }
+    User:
+      type: object
+      required: [id, username, displayName, globalRole, status, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        username: { type: string }
+        displayName: { type: string }
+        globalRole: { $ref: '#/components/schemas/GlobalRole' }
+        status: { $ref: '#/components/schemas/UserStatus' }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    GlobalRole:
+      type: string
+      enum: [ADMIN, USER]
+    UserStatus:
+      type: string
+      enum: [ACTIVE, DISABLED]
+    ProjectRole:
+      type: string
+      enum: [PROJECT_ADMIN, REVIEWER, DESIGNER, VIEWER]
+    Project:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        status: { type: string, enum: [ACTIVE, ARCHIVED] }
+        createdBy: { type: string, format: uuid }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    ProjectMember:
+      type: object
+      properties:
+        user: { $ref: '#/components/schemas/User' }
+        role: { $ref: '#/components/schemas/ProjectRole' }
+        createdAt: { type: string, format: date-time }
+    AuditLog:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        actorUserId: { type: [string, 'null'], format: uuid }
+        action: { type: string }
+        targetType: { type: string }
+        targetId: { type: [string, 'null'] }
+        success: { type: boolean }
+        requestId: { type: [string, 'null'] }
+        createdAt: { type: string, format: date-time }
+    ApiError:
+      type: object
+      required: [code, message, timestamp, violations]
+      properties:
+        code: { type: string }
+        message: { type: string }
+        requestId: { type: [string, 'null'] }
+        timestamp: { type: string, format: date-time }
+        violations:
+          type: array
+          items:
+            type: object
+            properties:
+              field: { type: string }
+              message: { type: string }

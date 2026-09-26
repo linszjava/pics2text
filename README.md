@@ -2,12 +2,13 @@
 
 将大量照片自动排版为指定文字，并支持曲面载体预览及超大印刷文件输出的平台。
 
-P00 工程基础已经完成，下一阶段为 P01 身份认证与项目权限。代码采用模块化单体架构，计算密集型任务通过独立 Worker 进程运行；在业务边界和容量要求尚未稳定前不拆分微服务。
+P00 工程基础和 P01 身份认证与项目权限已经完成，下一阶段为 P02 项目与照片上传。代码采用模块化单体架构，计算密集型任务通过独立 Worker 进程运行；在业务边界和容量要求尚未稳定前不拆分微服务。
 
 ## 项目文档
 
 - [项目开发计划](docs/PROJECT_PLAN.md)
 - [阶段文档索引](docs/progress/README.md)
+- [OpenAPI 说明](docs/api/openapi.yaml)
 - [阶段完成文档模板](docs/templates/PHASE_COMPLETION_TEMPLATE.md)
 
 ## 技术基线
@@ -83,3 +84,23 @@ make infra-down
 ## 配置约定
 
 Java 应用可通过环境变量覆盖默认连接信息，例如 `DB_URL`、`DB_USERNAME`、`DB_PASSWORD`、`REDIS_HOST`、`REDIS_PORT`、`RABBITMQ_HOST`、`RABBITMQ_PORT`、`RABBITMQ_USERNAME` 和 `RABBITMQ_PASSWORD`。生产环境必须由密钥管理系统注入凭据。
+
+## 首次管理员初始化
+
+生产部署前必须将 `IDENTITY_BOOTSTRAP_TOKEN` 替换为随机高强度值。初始化接口通过数据库原子状态保证只能成功执行一次：
+
+```bash
+curl -X POST http://localhost:18080/api/v1/auth/bootstrap \
+  -H 'Content-Type: application/json' \
+  -H 'X-Bootstrap-Token: pics2text-bootstrap-dev' \
+  -d '{"username":"admin","password":"Replace-Me-2026!","displayName":"系统管理员"}'
+```
+
+登录成功后使用响应中的 `tokenValue` 访问受保护接口：
+
+```bash
+curl http://localhost:18080/api/v1/auth/me \
+  -H 'Authorization: Bearer <tokenValue>'
+```
+
+密码必须为 12 至 128 位，并同时包含大小写字母、数字和特殊字符。默认连续失败 5 次后，同一用户名与客户端地址组合将被限制 15 分钟。

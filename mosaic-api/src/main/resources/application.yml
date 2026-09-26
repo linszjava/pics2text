@@ -31,18 +31,27 @@ spring:
 
 mybatis-plus:
   mapper-locations: classpath*:/mapper/**/*.xml
+  type-handlers-package: com.pics2text.api.infrastructure.mybatis
   configuration:
     map-underscore-to-camel-case: true
   global-config:
     banner: false
 
 sa-token:
-  token-name: pics2text-token
+  token-name: Authorization
+  token-prefix: Bearer
   timeout: 2592000
   active-timeout: 1800
   is-concurrent: true
   is-share: false
+  max-login-count: 5
   token-style: uuid
+
+identity:
+  bootstrap-token: ${IDENTITY_BOOTSTRAP_TOKEN:pics2text-bootstrap-dev}
+  login:
+    maximum-attempts: ${LOGIN_MAXIMUM_ATTEMPTS:5}
+    lock-duration: ${LOGIN_LOCK_DURATION:15m}
 
 management:
   endpoints:

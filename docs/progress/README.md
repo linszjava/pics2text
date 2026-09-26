@@ -5,7 +5,7 @@
 | 阶段 | 内容 | 状态 | 完成文档 |
 |---|---|---|---|
 | P00 | 工程骨架与质量基线 | 已完成 | [P00-engineering-foundation.md](P00-engineering-foundation.md) |
-| P01 | 身份认证与项目权限 | 未开始 | `P01-identity-and-access.md` |
+| P01 | 身份认证与项目权限 | 已完成 | [P01-identity-and-access.md](P01-identity-and-access.md) |
 | P02 | 项目与照片上传 | 未开始 | `P02-project-and-upload.md` |
 | P03 | 异步任务与可靠消息 | 未开始 | `P03-job-and-messaging.md` |
 | P04 | 照片分析与审核 | 未开始 | `P04-photo-analysis.md` |

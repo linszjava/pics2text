@@ -1,15 +1,20 @@
 package com.pics2text.api.common;
 
+import cn.dev33.satoken.exception.NotLoginException;
+import cn.dev33.satoken.exception.NotPermissionException;
+import cn.dev33.satoken.exception.NotRoleException;
 import jakarta.servlet.http.HttpServletRequest;
 import java.time.Instant;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -38,6 +43,39 @@ public class GlobalExceptionHandler {
                 .body(error("VALIDATION_FAILED", "请求参数校验失败", request, violations));
     }
 
+    @ExceptionHandler(NotLoginException.class)
+    public ResponseEntity<ApiError> handleNotLoginException(
+            NotLoginException exception,
+            HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .body(error("AUTHENTICATION_REQUIRED", "登录状态无效或已过期", request, List.of()));
+    }
+
+    @ExceptionHandler({NotPermissionException.class, NotRoleException.class})
+    public ResponseEntity<ApiError> handleForbiddenException(
+            RuntimeException exception,
+            HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .body(error("PERMISSION_DENIED", "没有执行该操作的权限", request, List.of()));
+    }
+
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ApiError> handleUnreadableMessage(
+            HttpMessageNotReadableException exception,
+            HttpServletRequest request) {
+        return ResponseEntity.badRequest()
+                .body(error("REQUEST_BODY_INVALID", "请求体格式或枚举值不正确", request, List.of()));
+    }
+
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<ApiError> handleDataConflict(
+            DataIntegrityViolationException exception,
+            HttpServletRequest request) {
+        log.warn("Data integrity conflict", exception);
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(error("DATA_CONFLICT", "数据状态冲突", request, List.of()));
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiError> handleUnexpectedException(
             Exception exception,
@@ -61,4 +99,3 @@ public class GlobalExceptionHandler {
                 violations);
     }
 }
-
