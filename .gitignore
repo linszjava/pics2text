@@ -18,6 +18,9 @@ dist/
 
 # Operating systems
 .DS_Store
+
+# 阶段进度说明仅保存在本地，不提交到远程仓库
+/docs/progress/
 Thumbs.db
 
 # Environment and secrets
@@ -36,4 +39,3 @@ temp/
 data/
 uploads/
 renders/
-

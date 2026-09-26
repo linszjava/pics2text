@@ -25,4 +25,11 @@ class ProjectRoleTest {
         assertFalse(ProjectRole.VIEWER.allows(ProjectPermission.EDIT_LAYOUT));
         assertFalse(ProjectRole.VIEWER.allows(ProjectPermission.MANAGE_MEMBERS));
     }
+
+    @Test
+    void reviewerCanUploadAndManagePhotosButCannotManageProject() {
+        assertTrue(ProjectRole.REVIEWER.allows(ProjectPermission.UPLOAD_PHOTOS));
+        assertTrue(ProjectRole.REVIEWER.allows(ProjectPermission.MANAGE_PHOTOS));
+        assertFalse(ProjectRole.REVIEWER.allows(ProjectPermission.MANAGE_PROJECT));
+    }
 }

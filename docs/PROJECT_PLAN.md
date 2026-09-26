@@ -122,8 +122,8 @@ mosaic-platform/
 3. 阶段验收项通过；
 4. 数据库变更已加入 Flyway；
 5. 配置和部署变更已记录；
-6. 已在 `docs/progress/` 下创建对应的阶段完成文档；
-7. 已更新 `docs/progress/README.md` 的状态和文档链接。
+6. 已在本地 `docs/progress/` 下创建对应的阶段完成文档；该目录由 Git 忽略，不提交远程仓库；
+7. 已更新本地 `docs/progress/README.md` 的状态和文档链接。
 
 阶段完成文档必须基于 [阶段完成文档模板](templates/PHASE_COMPLETION_TEMPLATE.md)，至少说明：
 

@@ -2,12 +2,11 @@
 
 将大量照片自动排版为指定文字，并支持曲面载体预览及超大印刷文件输出的平台。
 
-P00 工程基础和 P01 身份认证与项目权限已经完成，下一阶段为 P02 项目与照片上传。代码采用模块化单体架构，计算密集型任务通过独立 Worker 进程运行；在业务边界和容量要求尚未稳定前不拆分微服务。
+P00 工程基础、P01 身份认证与项目权限、P02 项目与照片上传已经完成，下一阶段为 P03 异步任务与可靠消息。代码采用模块化单体架构，计算密集型任务通过独立 Worker 进程运行；在业务边界和容量要求尚未稳定前不拆分微服务。
 
 ## 项目文档
 
 - [项目开发计划](docs/PROJECT_PLAN.md)
-- [阶段文档索引](docs/progress/README.md)
 - [OpenAPI 说明](docs/api/openapi.yaml)
 - [阶段完成文档模板](docs/templates/PHASE_COMPLETION_TEMPLATE.md)
 
@@ -83,7 +82,9 @@ make infra-down
 
 ## 配置约定
 
-Java 应用可通过环境变量覆盖默认连接信息，例如 `DB_URL`、`DB_USERNAME`、`DB_PASSWORD`、`REDIS_HOST`、`REDIS_PORT`、`RABBITMQ_HOST`、`RABBITMQ_PORT`、`RABBITMQ_USERNAME` 和 `RABBITMQ_PASSWORD`。生产环境必须由密钥管理系统注入凭据。
+Java 应用可通过环境变量覆盖默认连接信息，例如 `DB_URL`、`DB_USERNAME`、`DB_PASSWORD`、`REDIS_HOST`、`REDIS_PORT`、`RABBITMQ_HOST`、`RABBITMQ_PORT`、`S3_ENDPOINT`、`S3_PUBLIC_ENDPOINT`、`S3_ACCESS_KEY` 和 `S3_SECRET_KEY`。生产环境必须由密钥管理系统注入凭据，对象桶必须保持私有。
+
+照片上传使用 S3 预签名 URL：先调用上传初始化接口，小文件直接 PUT 到返回 URL；大文件逐片获取 URL 并上传，最后把分片 ETag 清单提交到完成接口。API 会重新校验实际 SHA-256、大小、魔数和图片尺寸，验真通过后照片才进入 `AVAILABLE`。完整契约见 [OpenAPI 说明](docs/api/openapi.yaml)。
 
 ## 首次管理员初始化
 

@@ -12,6 +12,11 @@ public class ProjectEntity {
     private UUID id;
     private String name;
     private String status;
+    private String description;
+    private String configurationJson;
+    private Integer retentionDays;
+    private Long maxPhotoBytes;
+    private Instant archivedAt;
     private UUID createdBy;
     private Instant createdAt;
     private Instant updatedAt;
@@ -24,6 +29,10 @@ public class ProjectEntity {
         this.id = id;
         this.name = name;
         this.status = status;
+        this.description = "";
+        this.configurationJson = "{}";
+        this.retentionDays = 30;
+        this.maxPhotoBytes = 104857600L;
         this.createdBy = createdBy;
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
@@ -35,6 +44,16 @@ public class ProjectEntity {
     public void setName(String name) { this.name = name; }
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
+    public String getDescription() { return description; }
+    public void setDescription(String description) { this.description = description; }
+    public String getConfigurationJson() { return configurationJson; }
+    public void setConfigurationJson(String configurationJson) { this.configurationJson = configurationJson; }
+    public Integer getRetentionDays() { return retentionDays; }
+    public void setRetentionDays(Integer retentionDays) { this.retentionDays = retentionDays; }
+    public Long getMaxPhotoBytes() { return maxPhotoBytes; }
+    public void setMaxPhotoBytes(Long maxPhotoBytes) { this.maxPhotoBytes = maxPhotoBytes; }
+    public Instant getArchivedAt() { return archivedAt; }
+    public void setArchivedAt(Instant archivedAt) { this.archivedAt = archivedAt; }
     public UUID getCreatedBy() { return createdBy; }
     public void setCreatedBy(UUID createdBy) { this.createdBy = createdBy; }
     public Instant getCreatedAt() { return createdAt; }

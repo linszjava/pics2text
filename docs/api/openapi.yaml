@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: Pics2Text API
   version: 0.1.0
-  description: Pics2Text 身份认证、用户管理和项目成员权限 API。
+  description: Pics2Text 身份认证、项目管理与照片直传 API。
 servers:
   - url: http://localhost:18080
     description: 本地开发环境
@@ -10,6 +10,7 @@ tags:
   - name: Authentication
   - name: Users
   - name: Projects
+  - name: Photos
   - name: Audit
 paths:
   /api/v1/auth/bootstrap:
@@ -154,10 +155,19 @@ paths:
         '204': { description: 已踢出 }
         '403': { $ref: '#/components/responses/Forbidden' }
   /api/v1/projects:
+    get:
+      tags: [Projects]
+      summary: 查询当前用户可见项目
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: 项目列表
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Project' } }
     post:
       tags: [Projects]
       summary: 创建项目权限载体
-      description: P01 仅提供项目成员授权所需的最小项目模型，项目生命周期将在 P02 扩展。
       security: [{ bearerAuth: [] }]
       requestBody:
         required: true
@@ -190,6 +200,35 @@ paths:
               schema: { $ref: '#/components/schemas/Project' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Projects]
+      summary: 修改项目配置
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/ProjectId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateProjectRequest' }
+      responses:
+        '200': { description: 修改成功, content: { application/json: { schema: { $ref: '#/components/schemas/Project' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/projects/{projectId}/archive:
+    post:
+      tags: [Projects]
+      summary: 归档项目
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/ProjectId' }]
+      responses:
+        '200': { description: 已归档, content: { application/json: { schema: { $ref: '#/components/schemas/Project' } } } }
+  /api/v1/projects/{projectId}/activate:
+    post:
+      tags: [Projects]
+      summary: 恢复项目
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/ProjectId' }]
+      responses:
+        '200': { description: 已恢复, content: { application/json: { schema: { $ref: '#/components/schemas/Project' } } } }
   /api/v1/projects/{projectId}/members:
     get:
       tags: [Projects]
@@ -242,6 +281,106 @@ paths:
         '204': { description: 已移除 }
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/projects/{projectId}/photos/uploads:
+    post:
+      tags: [Photos]
+      summary: 创建照片直传会话
+      description: 小文件返回 PUT URL；大文件返回分片参数，文件内容不经 API 转发。
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/ProjectId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InitiateUploadRequest' }
+      responses:
+        '201': { description: 上传会话或重复照片, content: { application/json: { schema: { $ref: '#/components/schemas/InitiatedUpload' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/projects/{projectId}/photos/{photoId}/uploads/parts/{partNumber}/presign:
+    post:
+      tags: [Photos]
+      summary: 获取指定分片的上传 URL
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/ProjectId' }
+        - { $ref: '#/components/parameters/PhotoId' }
+        - { in: path, name: partNumber, required: true, schema: { type: integer, minimum: 1 } }
+      responses:
+        '200': { description: 预签名请求, content: { application/json: { schema: { $ref: '#/components/schemas/PresignedRequest' } } } }
+  /api/v1/projects/{projectId}/photos/{photoId}/uploads/complete:
+    post:
+      tags: [Photos]
+      summary: 完成上传并验真
+      description: 校验对象大小、实际 SHA-256、魔数、格式和分辨率；失败对象不会进入 AVAILABLE。
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/ProjectId' }, { $ref: '#/components/parameters/PhotoId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CompleteUploadRequest' }
+      responses:
+        '200': { description: 验真结果, content: { application/json: { schema: { $ref: '#/components/schemas/Photo' } } } }
+        '422': { description: 文件验真失败, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+  /api/v1/projects/{projectId}/photos/{photoId}/uploads/progress:
+    get:
+      tags: [Photos]
+      summary: 查询上传进度和失败原因
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/ProjectId' }, { $ref: '#/components/parameters/PhotoId' }]
+      responses:
+        '200': { description: 上传进度, content: { application/json: { schema: { $ref: '#/components/schemas/UploadProgress' } } } }
+  /api/v1/projects/{projectId}/photos/{photoId}/uploads:
+    delete:
+      tags: [Photos]
+      summary: 取消上传并清理对象
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/ProjectId' }, { $ref: '#/components/parameters/PhotoId' }]
+      responses:
+        '204': { description: 已取消 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/projects/{projectId}/photos:
+    get:
+      tags: [Photos]
+      summary: 分页查询照片
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/ProjectId' }
+        - { in: query, name: page, schema: { type: integer, minimum: 0, default: 0 } }
+        - { in: query, name: size, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        '200': { description: 照片列表, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Photo' } } } } }
+  /api/v1/projects/{projectId}/photos/{photoId}:
+    get:
+      tags: [Photos]
+      summary: 查询照片元数据
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/ProjectId' }, { $ref: '#/components/parameters/PhotoId' }]
+      responses:
+        '200': { description: 照片, content: { application/json: { schema: { $ref: '#/components/schemas/Photo' } } } }
+    delete:
+      tags: [Photos]
+      summary: 管理员删除照片及对象
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/ProjectId' }, { $ref: '#/components/parameters/PhotoId' }]
+      responses: { '204': { description: 已删除 }, '403': { $ref: '#/components/responses/Forbidden' } }
+  /api/v1/projects/{projectId}/photos/{photoId}/download-url:
+    post:
+      tags: [Photos]
+      summary: 获取私有原图下载 URL
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/ProjectId' }, { $ref: '#/components/parameters/PhotoId' }]
+      responses:
+        '200': { description: 预签名下载请求, content: { application/json: { schema: { $ref: '#/components/schemas/PresignedRequest' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/projects/{projectId}/photos/{photoId}/withdraw:
+    post:
+      tags: [Photos]
+      summary: 撤回照片并进入保留期
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/ProjectId' }, { $ref: '#/components/parameters/PhotoId' }]
+      responses:
+        '200': { description: 已撤回, content: { application/json: { schema: { $ref: '#/components/schemas/Photo' } } } }
   /api/v1/admin/audit-logs:
     get:
       tags: [Audit]
@@ -270,6 +409,11 @@ components:
     ProjectId:
       in: path
       name: projectId
+      required: true
+      schema: { type: string, format: uuid }
+    PhotoId:
+      in: path
+      name: photoId
       required: true
       schema: { type: string, format: uuid }
   responses:
@@ -350,7 +494,94 @@ components:
         id: { type: string, format: uuid }
         name: { type: string }
         status: { type: string, enum: [ACTIVE, ARCHIVED] }
+        description: { type: string }
+        configurationJson: { type: string, description: JSON 格式的项目业务配置 }
+        retentionDays: { type: integer, minimum: 1, maximum: 3650 }
+        maxPhotoBytes: { type: integer, format: int64 }
+        archivedAt: { type: [string, 'null'], format: date-time }
         createdBy: { type: string, format: uuid }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    UpdateProjectRequest:
+      type: object
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        description: { type: string, maxLength: 1000 }
+        configurationJson: { type: string, maxLength: 20000 }
+        retentionDays: { type: integer, minimum: 1, maximum: 3650 }
+        maxPhotoBytes: { type: integer, format: int64, minimum: 1024, maximum: 5368709120 }
+    InitiateUploadRequest:
+      type: object
+      required: [filename, contentType, byteSize, sha256, authorizationGranted]
+      properties:
+        filename: { type: string, minLength: 1, maxLength: 255 }
+        contentType: { type: string, enum: [image/jpeg, image/png, image/webp] }
+        byteSize: { type: integer, format: int64, minimum: 1 }
+        sha256: { type: string, pattern: '^[0-9a-fA-F]{64}$' }
+        authorizationGranted: { type: boolean }
+    CompletedPart:
+      type: object
+      required: [partNumber, eTag]
+      properties:
+        partNumber: { type: integer, minimum: 1 }
+        eTag: { type: string, minLength: 1 }
+    CompleteUploadRequest:
+      type: object
+      properties:
+        parts: { type: array, items: { $ref: '#/components/schemas/CompletedPart' } }
+    PresignedRequest:
+      type: object
+      required: [url, method, headers]
+      properties:
+        url: { type: string, format: uri }
+        method: { type: string, enum: [GET, PUT] }
+        headers:
+          type: object
+          additionalProperties: { type: array, items: { type: string } }
+    InitiatedUpload:
+      type: object
+      properties:
+        photo: { $ref: '#/components/schemas/Photo' }
+        duplicate: { type: boolean }
+        directUpload: { anyOf: [{ $ref: '#/components/schemas/PresignedRequest' }, { type: 'null' }] }
+        partSize: { type: [integer, 'null'], format: int64 }
+        partCount: { type: integer }
+        expiresAt: { type: string, format: date-time }
+    UploadProgress:
+      type: object
+      properties:
+        status: { $ref: '#/components/schemas/PhotoStatus' }
+        uploadedBytes: { type: integer, format: int64 }
+        totalBytes: { type: integer, format: int64 }
+        uploadedParts: { type: integer }
+        totalParts: { type: integer }
+        failureCode: { type: [string, 'null'] }
+        failureMessage: { type: [string, 'null'] }
+    PhotoStatus:
+      type: string
+      enum: [UPLOADING, VERIFYING, AVAILABLE, DUPLICATE, FAILED, WITHDRAWN, DELETED]
+    Photo:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        projectId: { type: string, format: uuid }
+        uploaderId: { type: string, format: uuid }
+        originalFilename: { type: string }
+        declaredContentType: { type: string }
+        detectedContentType: { type: [string, 'null'] }
+        byteSize: { type: integer, format: int64 }
+        width: { type: [integer, 'null'] }
+        height: { type: [integer, 'null'] }
+        sha256: { type: string }
+        authorizationStatus: { type: string, enum: [PENDING, GRANTED, REVOKED] }
+        reviewStatus: { type: string, enum: [PENDING, APPROVED, REJECTED] }
+        status: { $ref: '#/components/schemas/PhotoStatus' }
+        uploadMode: { type: string, enum: [SINGLE, MULTIPART] }
+        duplicateOf: { type: [string, 'null'], format: uuid }
+        failureCode: { type: [string, 'null'] }
+        failureMessage: { type: [string, 'null'] }
+        retentionUntil: { type: [string, 'null'], format: date-time }
+        availableAt: { type: [string, 'null'], format: date-time }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
     ProjectMember:

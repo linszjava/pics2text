@@ -38,10 +38,18 @@
         <mybatis-plus.version>3.5.17</mybatis-plus.version>
         <sa-token.version>1.46.0</sa-token.version>
         <archunit.version>1.4.1</archunit.version>
+        <aws-sdk.version>2.54.17</aws-sdk.version>
     </properties>
 
     <dependencyManagement>
         <dependencies>
+            <dependency>
+                <groupId>software.amazon.awssdk</groupId>
+                <artifactId>bom</artifactId>
+                <version>${aws-sdk.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
             <dependency>
                 <groupId>com.baomidou</groupId>
                 <artifactId>mybatis-plus-spring-boot4-starter</artifactId>
@@ -101,4 +109,3 @@
         </plugins>
     </build>
 </project>
-
