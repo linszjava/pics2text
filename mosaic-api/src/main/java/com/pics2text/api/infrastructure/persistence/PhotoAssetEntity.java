@@ -21,16 +21,23 @@ public class PhotoAssetEntity {
     private String authorizationStatus;
     private String reviewStatus;
     private String status;
+    private String analysisStatus;
     private String uploadMode;
     private String multipartUploadId;
     private Long partSize;
     private Integer expectedPartCount;
     private String originalKey;
+    private String sourceKey;
     private String thumbnailKey;
     private String previewKey;
     private UUID duplicateOf;
     private String failureCode;
     private String failureMessage;
+    private String analysisErrorCode;
+    private String analysisErrorMessage;
+    private UUID reviewedBy;
+    private Instant reviewedAt;
+    private String reviewNote;
     private Instant uploadExpiresAt;
     private Instant retentionUntil;
     private Instant availableAt;
@@ -66,6 +73,8 @@ public class PhotoAssetEntity {
     public void setReviewStatus(String reviewStatus) { this.reviewStatus = reviewStatus; }
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
+    public String getAnalysisStatus() { return analysisStatus; }
+    public void setAnalysisStatus(String analysisStatus) { this.analysisStatus = analysisStatus; }
     public String getUploadMode() { return uploadMode; }
     public void setUploadMode(String uploadMode) { this.uploadMode = uploadMode; }
     public String getMultipartUploadId() { return multipartUploadId; }
@@ -76,6 +85,8 @@ public class PhotoAssetEntity {
     public void setExpectedPartCount(Integer expectedPartCount) { this.expectedPartCount = expectedPartCount; }
     public String getOriginalKey() { return originalKey; }
     public void setOriginalKey(String originalKey) { this.originalKey = originalKey; }
+    public String getSourceKey() { return sourceKey; }
+    public void setSourceKey(String sourceKey) { this.sourceKey = sourceKey; }
     public String getThumbnailKey() { return thumbnailKey; }
     public void setThumbnailKey(String thumbnailKey) { this.thumbnailKey = thumbnailKey; }
     public String getPreviewKey() { return previewKey; }
@@ -86,6 +97,16 @@ public class PhotoAssetEntity {
     public void setFailureCode(String failureCode) { this.failureCode = failureCode; }
     public String getFailureMessage() { return failureMessage; }
     public void setFailureMessage(String failureMessage) { this.failureMessage = failureMessage; }
+    public String getAnalysisErrorCode() { return analysisErrorCode; }
+    public void setAnalysisErrorCode(String analysisErrorCode) { this.analysisErrorCode = analysisErrorCode; }
+    public String getAnalysisErrorMessage() { return analysisErrorMessage; }
+    public void setAnalysisErrorMessage(String analysisErrorMessage) { this.analysisErrorMessage = analysisErrorMessage; }
+    public UUID getReviewedBy() { return reviewedBy; }
+    public void setReviewedBy(UUID reviewedBy) { this.reviewedBy = reviewedBy; }
+    public Instant getReviewedAt() { return reviewedAt; }
+    public void setReviewedAt(Instant reviewedAt) { this.reviewedAt = reviewedAt; }
+    public String getReviewNote() { return reviewNote; }
+    public void setReviewNote(String reviewNote) { this.reviewNote = reviewNote; }
     public Instant getUploadExpiresAt() { return uploadExpiresAt; }
     public void setUploadExpiresAt(Instant uploadExpiresAt) { this.uploadExpiresAt = uploadExpiresAt; }
     public Instant getRetentionUntil() { return retentionUntil; }

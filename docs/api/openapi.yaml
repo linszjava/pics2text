@@ -374,6 +374,31 @@ paths:
       responses:
         '200': { description: 预签名下载请求, content: { application/json: { schema: { $ref: '#/components/schemas/PresignedRequest' } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/projects/{projectId}/photos/{photoId}/analysis:
+    get:
+      tags: [Photos]
+      summary: 查询照片分析结果和衍生图
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/ProjectId' }, { $ref: '#/components/parameters/PhotoId' }]
+      responses:
+        '200': { description: 分析结果, content: { application/json: { schema: { $ref: '#/components/schemas/PhotoAnalysisResult' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/projects/{projectId}/photos/{photoId}/review:
+    post:
+      tags: [Photos]
+      summary: 人工审核照片
+      description: 需要项目照片审核权限，且只能审核已完成自动分析的可用照片。
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/ProjectId' }, { $ref: '#/components/parameters/PhotoId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ManualReviewRequest' }
+      responses:
+        '200': { description: 审核后的照片, content: { application/json: { schema: { $ref: '#/components/schemas/Photo' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
   /api/v1/projects/{projectId}/photos/{photoId}/withdraw:
     post:
       tags: [Photos]
@@ -631,6 +656,9 @@ components:
     PhotoStatus:
       type: string
       enum: [UPLOADING, VERIFYING, AVAILABLE, DUPLICATE, FAILED, WITHDRAWN, DELETED]
+    AnalysisStatus:
+      type: string
+      enum: [PENDING, PROCESSING, SUCCEEDED, FAILED]
     Photo:
       type: object
       properties:
@@ -647,14 +675,74 @@ components:
         authorizationStatus: { type: string, enum: [PENDING, GRANTED, REVOKED] }
         reviewStatus: { type: string, enum: [PENDING, APPROVED, REJECTED] }
         status: { $ref: '#/components/schemas/PhotoStatus' }
+        analysisStatus: { anyOf: [{ $ref: '#/components/schemas/AnalysisStatus' }, { type: 'null' }] }
         uploadMode: { type: string, enum: [SINGLE, MULTIPART] }
         duplicateOf: { type: [string, 'null'], format: uuid }
         failureCode: { type: [string, 'null'] }
         failureMessage: { type: [string, 'null'] }
+        analysisErrorCode: { type: [string, 'null'] }
+        analysisErrorMessage: { type: [string, 'null'] }
+        reviewedBy: { type: [string, 'null'], format: uuid }
+        reviewedAt: { type: [string, 'null'], format: date-time }
+        reviewNote: { type: [string, 'null'] }
         retentionUntil: { type: [string, 'null'], format: date-time }
         availableAt: { type: [string, 'null'], format: date-time }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
+    ManualReviewRequest:
+      type: object
+      required: [decision, note]
+      properties:
+        decision: { type: string, enum: [APPROVED, REJECTED] }
+        note: { type: string, minLength: 1, maxLength: 500 }
+    PhotoAnalysisResult:
+      type: object
+      properties:
+        analysis: { $ref: '#/components/schemas/PhotoAnalysis' }
+        variants:
+          type: array
+          items: { $ref: '#/components/schemas/PhotoVariant' }
+    PhotoAnalysis:
+      type: object
+      properties:
+        photoId: { type: string, format: uuid }
+        projectId: { type: string, format: uuid }
+        algorithmVersion: { type: string }
+        sharpness: { type: number, format: double }
+        brightness: { type: number, format: double }
+        contrast: { type: number, format: double }
+        labL: { type: number, format: double }
+        labA: { type: number, format: double }
+        labB: { type: number, format: double }
+        dHash: { type: string, pattern: '^[0-9a-f]{16}$' }
+        pHash: { type: string, pattern: '^[0-9a-f]{16}$' }
+        faceCount: { type: integer, minimum: 0 }
+        facesJson: { type: string, description: 归一化人脸框 JSON 数组 }
+        subjectX: { type: number, minimum: 0, maximum: 1 }
+        subjectY: { type: number, minimum: 0, maximum: 1 }
+        subjectWidth: { type: number, exclusiveMinimum: 0, maximum: 1 }
+        subjectHeight: { type: number, exclusiveMinimum: 0, maximum: 1 }
+        cropX: { type: number, minimum: 0, maximum: 1 }
+        cropY: { type: number, minimum: 0, maximum: 1 }
+        cropWidth: { type: number, exclusiveMinimum: 0, maximum: 1 }
+        cropHeight: { type: number, exclusiveMinimum: 0, maximum: 1 }
+        duplicateGroupId: { type: [string, 'null'], format: uuid }
+        autoReviewDecision: { type: string, enum: [AUTO_APPROVED, NEEDS_REVIEW, AUTO_REJECTED] }
+        reviewReasonsJson: { type: string, description: 自动审核原因 JSON 数组 }
+        orientationApplied: { type: integer, minimum: 1, maximum: 8 }
+        analyzedAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    PhotoVariant:
+      type: object
+      properties:
+        photoId: { type: string, format: uuid }
+        variantType: { type: string, enum: [THUMBNAIL_256, PREVIEW_1024, ANALYSIS_2048] }
+        objectKey: { type: string }
+        width: { type: integer, minimum: 1 }
+        height: { type: integer, minimum: 1 }
+        byteSize: { type: integer, format: int64, minimum: 1 }
+        contentType: { type: string, enum: [image/webp] }
+        createdAt: { type: string, format: date-time }
     ProjectMember:
       type: object
       properties:

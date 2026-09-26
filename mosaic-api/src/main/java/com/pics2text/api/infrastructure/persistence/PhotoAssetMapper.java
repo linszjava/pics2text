@@ -41,6 +41,20 @@ public interface PhotoAssetMapper extends BaseMapper<PhotoAssetEntity> {
             """)
     List<PhotoAssetEntity> findExpiredRetention(@Param("now") Instant now, @Param("limit") int limit);
 
+    @Select("""
+            SELECT p.* FROM photo_asset p
+            WHERE p.status = 'AVAILABLE' AND p.analysis_status = 'PENDING'
+              AND NOT EXISTS (
+                SELECT 1 FROM processing_job j
+                WHERE j.resource_type = 'PHOTO_ASSET' AND j.resource_id = p.id
+                  AND j.type = 'PHOTO_ANALYSIS'
+                  AND j.status IN ('PENDING', 'RUNNING', 'RETRY_WAIT', 'CANCELLATION_REQUESTED')
+              )
+            ORDER BY p.available_at LIMIT #{limit}
+            FOR UPDATE OF p SKIP LOCKED
+            """)
+    List<PhotoAssetEntity> findAnalysisDispatchCandidates(@Param("limit") int limit);
+
     @Update("""
             UPDATE photo_asset SET status = #{status}, failure_code = #{failureCode},
               failure_message = #{failureMessage}, updated_at = #{updatedAt}

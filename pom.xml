@@ -40,6 +40,8 @@
         <sa-token.version>1.46.0</sa-token.version>
         <archunit.version>1.4.1</archunit.version>
         <aws-sdk.version>2.54.17</aws-sdk.version>
+        <opencv.version>4.9.0-0</opencv.version>
+        <metadata-extractor.version>2.19.0</metadata-extractor.version>
     </properties>
 
     <dependencyManagement>
@@ -70,6 +72,16 @@
                 <groupId>com.tngtech.archunit</groupId>
                 <artifactId>archunit-junit5</artifactId>
                 <version>${archunit.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.openpnp</groupId>
+                <artifactId>opencv</artifactId>
+                <version>${opencv.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.drewnoakes</groupId>
+                <artifactId>metadata-extractor</artifactId>
+                <version>${metadata-extractor.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>

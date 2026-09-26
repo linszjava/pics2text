@@ -2,7 +2,7 @@
 
 将大量照片自动排版为指定文字，并支持曲面载体预览及超大印刷文件输出的平台。
 
-P00 工程基础、P01 身份认证与项目权限、P02 项目与照片上传、P03 异步任务与可靠消息已经完成，下一阶段为 P04 照片分析与审核。代码采用模块化单体架构，计算密集型任务通过独立 Worker 进程运行；在业务边界和容量要求尚未稳定前不拆分微服务。
+P00 工程基础、P01 身份认证与项目权限、P02 项目与照片上传、P03 异步任务与可靠消息、P04 照片分析与审核已经完成，下一阶段为 P05 文字蒙版与网格生成。代码采用模块化单体架构，计算密集型任务通过独立 Worker 进程运行；在业务边界和容量要求尚未稳定前不拆分微服务。
 
 ## 项目文档
 
@@ -20,7 +20,7 @@ P00 工程基础、P01 身份认证与项目权限、P02 项目与照片上传�
 - Redis
 - RabbitMQ
 - S3 兼容对象存储（开发环境使用 SeaweedFS）
-- OpenCV + libvips
+- OpenCV（照片分析）+ libvips（后续超大图渲染）
 - React + TypeScript + PixiJS + Three.js
 
 ## 工程模块
@@ -88,6 +88,8 @@ Java 应用可通过环境变量覆盖默认连接信息，例如 `DB_URL`、`DB
 照片上传使用 S3 预签名 URL：先调用上传初始化接口，小文件直接 PUT 到返回 URL；大文件逐片获取 URL 并上传，最后把分片 ETag 清单提交到完成接口。API 会重新校验实际 SHA-256、大小、魔数和图片尺寸，验真通过后照片才进入 `AVAILABLE`。完整契约见 [OpenAPI 说明](docs/api/openapi.yaml)。
 
 异步作业通过数据库事务同时写入 `processing_job` 与 `outbox_event`，发布器收到 RabbitMQ Publisher Confirm 后才将事件标记为已发布。Worker 使用手动 ACK、消费幂等记录、有限指数退避、专用重试队列和死信队列；API 负责心跳超时接管，并通过 SSE 推送进度。业务代码通过 `JobCoordinator` 创建作业，Worker 通过 `JobHandler` 扩展具体算法。
+
+上传验真通过后会自动创建 `PHOTO_ANALYSIS` 作业。Analysis Worker 对源文件执行字节数和像素数双重限制、EXIF 方向纠正与元数据清理，生成规范化 JPEG 及 256/1024/2048 三档 WebP；同时计算拉普拉斯清晰度、亮度、对比度、Lab 均值、dHash/pHash、主体或人脸保护框和推荐裁剪。可通过 `PHOTO_ANALYSIS_MAX_SOURCE_BYTES`、`PHOTO_ANALYSIS_MAX_PIXELS`、质量阈值及 `PHOTO_FACE_CASCADE_PATH` 调整分析策略；未配置人脸级联模型时使用主体边缘区域兜底。分析结果和人工审核接口见 [OpenAPI 说明](docs/api/openapi.yaml)。
 
 ## 首次管理员初始化
 

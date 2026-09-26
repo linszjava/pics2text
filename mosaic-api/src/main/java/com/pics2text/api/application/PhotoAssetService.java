@@ -7,10 +7,16 @@ import com.pics2text.api.infrastructure.persistence.PhotoAssetMapper;
 import com.pics2text.api.infrastructure.persistence.ProjectEntity;
 import com.pics2text.api.infrastructure.storage.ObjectStorageGateway;
 import com.pics2text.identity.domain.User;
+import com.pics2text.job.application.JobCoordinator;
+import com.pics2text.job.domain.JobType;
 import com.pics2text.photoasset.domain.AuthorizationStatus;
+import com.pics2text.photoasset.domain.AnalysisStatus;
 import com.pics2text.photoasset.domain.PhotoAssetStatus;
 import com.pics2text.photoasset.domain.ReviewStatus;
 import com.pics2text.photoasset.domain.UploadMode;
+import com.pics2text.photoasset.infrastructure.persistence.PhotoAnalysisEntity;
+import com.pics2text.photoasset.infrastructure.persistence.PhotoAnalysisMapper;
+import com.pics2text.photoasset.infrastructure.persistence.PhotoVariantEntity;
 import com.pics2text.project.domain.ProjectPermission;
 import com.pics2text.project.domain.ProjectRole;
 import java.time.Instant;
@@ -18,6 +24,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
@@ -26,6 +33,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 
 @Service
 public class PhotoAssetService {
@@ -39,10 +48,14 @@ public class PhotoAssetService {
     private final ObjectKeyPolicy keyPolicy;
     private final PhotoObjectVerifier verifier;
     private final AuditService audit;
+    private final JobCoordinator jobs;
+    private final ObjectMapper objectMapper;
+    private final PhotoAnalysisMapper analysisMapper;
 
     public PhotoAssetService(PhotoAssetMapper mapper, ProjectAccessService access,
             ObjectStorageGateway storage, ObjectStorageProperties properties,
-            ObjectKeyPolicy keyPolicy, PhotoObjectVerifier verifier, AuditService audit) {
+            ObjectKeyPolicy keyPolicy, PhotoObjectVerifier verifier, AuditService audit,
+            JobCoordinator jobs, ObjectMapper objectMapper, PhotoAnalysisMapper analysisMapper) {
         this.mapper = mapper;
         this.access = access;
         this.storage = storage;
@@ -50,6 +63,9 @@ public class PhotoAssetService {
         this.keyPolicy = keyPolicy;
         this.verifier = verifier;
         this.audit = audit;
+        this.jobs = jobs;
+        this.objectMapper = objectMapper;
+        this.analysisMapper = analysisMapper;
     }
 
     @Transactional
@@ -97,6 +113,7 @@ public class PhotoAssetService {
         asset.setAuthorizationStatus(authorizationGranted ? AuthorizationStatus.GRANTED.name() : AuthorizationStatus.PENDING.name());
         asset.setReviewStatus(ReviewStatus.PENDING.name());
         asset.setStatus(PhotoAssetStatus.UPLOADING.name());
+        asset.setAnalysisStatus(AnalysisStatus.PENDING.name());
         asset.setUploadMode(mode.name());
         asset.setMultipartUploadId(uploadId);
         asset.setPartSize(mode == UploadMode.MULTIPART ? properties.multipartPartSize() : null);
@@ -182,6 +199,9 @@ public class PhotoAssetService {
             }
             asset.setUpdatedAt(Instant.now());
             mapper.updateById(asset);
+            if (PhotoAssetStatus.AVAILABLE.name().equals(asset.getStatus())) {
+                enqueueAnalysis(asset, actor.id());
+            }
             audit.record(actor.id(), "PHOTO_UPLOAD_COMPLETE", "PHOTO_ASSET", photoId.toString(), true);
             return asset;
         } catch (ApiException exception) {
@@ -204,6 +224,36 @@ public class PhotoAssetService {
 
     public PhotoAssetEntity get(UUID projectId, UUID photoId) {
         access.require(projectId, ProjectPermission.VIEW);
+        return require(projectId, photoId);
+    }
+
+    public AnalysisResult analysis(UUID projectId, UUID photoId) {
+        access.require(projectId, ProjectPermission.VIEW);
+        require(projectId, photoId);
+        PhotoAnalysisEntity result = analysisMapper.findAnalysis(photoId);
+        if (result == null) {
+            throw new ApiException("PHOTO_ANALYSIS_NOT_READY", "照片分析结果尚未生成", HttpStatus.NOT_FOUND);
+        }
+        return new AnalysisResult(result, analysisMapper.listVariants(photoId));
+    }
+
+    @Transactional
+    public PhotoAssetEntity review(UUID projectId, UUID photoId, ReviewStatus decision, String note) {
+        User actor = access.require(projectId, ProjectPermission.REVIEW_PHOTOS);
+        if (decision == null || decision == ReviewStatus.PENDING) {
+            throw bad("PHOTO_REVIEW_DECISION_INVALID", "人工审核只能选择通过或拒绝");
+        }
+        String normalizedNote = note == null ? "" : note.trim();
+        if (normalizedNote.isBlank() || normalizedNote.length() > 500) {
+            throw bad("PHOTO_REVIEW_NOTE_INVALID", "审核说明不能为空且不能超过500个字符");
+        }
+        require(projectId, photoId);
+        if (analysisMapper.manualReview(projectId, photoId, decision.name(), actor.id(),
+                normalizedNote, Instant.now()) == 0) {
+            throw conflict("PHOTO_REVIEW_STATE_INVALID", "仅可审核已完成分析的可用照片");
+        }
+        audit.record(actor.id(), "PHOTO_MANUAL_REVIEW_" + decision.name(),
+                "PHOTO_ASSET", photoId.toString(), true);
         return require(projectId, photoId);
     }
 
@@ -270,6 +320,16 @@ public class PhotoAssetService {
         if (numbers.size() != expected) throw bad("UPLOAD_PARTS_INCOMPLETE", "分片清单不完整");
     }
 
+    private void enqueueAnalysis(PhotoAssetEntity asset, UUID actorId) {
+        try {
+            String payload = objectMapper.writeValueAsString(Map.of("photoId", asset.getId()));
+            jobs.enqueue(asset.getProjectId(), actorId, JobType.PHOTO_ANALYSIS,
+                    "PHOTO_ASSET", asset.getId(), payload, 5, true);
+        } catch (JacksonException exception) {
+            throw new IllegalStateException("无法创建照片分析任务", exception);
+        }
+    }
+
     private void registerMultipartRollbackCleanup(String objectKey, String uploadId) {
         if (uploadId == null || !TransactionSynchronizationManager.isSynchronizationActive()) return;
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
@@ -324,8 +384,13 @@ public class PhotoAssetService {
         } else {
             storage.delete(asset.getOriginalKey());
         }
+        if (asset.getSourceKey() != null && !asset.getSourceKey().equals(asset.getOriginalKey())) {
+            storage.delete(asset.getSourceKey());
+        }
         storage.delete(asset.getThumbnailKey());
         storage.delete(asset.getPreviewKey());
+        analysisMapper.listVariants(asset.getId()).stream()
+                .map(PhotoVariantEntity::objectKey).distinct().forEach(storage::delete);
     }
 
     private ApiException bad(String code, String message) { return new ApiException(code, message, HttpStatus.BAD_REQUEST); }
@@ -335,4 +400,5 @@ public class PhotoAssetService {
             ObjectStorageGateway.PresignedRequest directUpload) {}
     public record UploadProgress(String status, long uploadedBytes, long totalBytes,
             int uploadedParts, int totalParts, String failureCode, String failureMessage) {}
+    public record AnalysisResult(PhotoAnalysisEntity analysis, List<PhotoVariantEntity> variants) {}
 }

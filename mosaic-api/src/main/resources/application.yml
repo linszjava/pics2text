@@ -68,6 +68,9 @@ object-storage:
   cleanup-interval: ${PHOTO_CLEANUP_INTERVAL:1h}
 
 jobs:
+  analysis-dispatch:
+    enabled: ${JOB_ANALYSIS_DISPATCH_ENABLED:true}
+    interval: ${JOB_ANALYSIS_DISPATCH_INTERVAL:30s}
   publisher:
     enabled: true
     interval: ${JOB_OUTBOX_INTERVAL:1000}

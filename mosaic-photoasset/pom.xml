@@ -15,6 +15,9 @@
             <artifactId>mosaic-shared-kernel</artifactId>
             <version>${project.version}</version>
         </dependency>
+        <dependency>
+            <groupId>com.baomidou</groupId>
+            <artifactId>mybatis-plus-spring-boot4-starter</artifactId>
+        </dependency>
     </dependencies>
 </project>
-

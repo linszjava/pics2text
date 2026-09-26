@@ -29,6 +29,25 @@ jobs:
     base-delay: ${JOB_RETRY_BASE_DELAY:5s}
     max-delay: ${JOB_RETRY_MAX_DELAY:5m}
 
+object-storage:
+  endpoint: ${S3_ENDPOINT:http://localhost:19000}
+  region: ${S3_REGION:us-east-1}
+  access-key: ${S3_ACCESS_KEY:pics2text}
+  secret-key: ${S3_SECRET_KEY:pics2text_dev_secret}
+  bucket: ${S3_BUCKET:pics2text}
+
+photo-analysis:
+  max-source-bytes: ${PHOTO_ANALYSIS_MAX_SOURCE_BYTES:104857600}
+  max-pixels: ${PHOTO_ANALYSIS_MAX_PIXELS:80000000}
+  candidate-limit: ${PHOTO_ANALYSIS_CANDIDATE_LIMIT:5000}
+  d-hash-distance: ${PHOTO_ANALYSIS_DHASH_DISTANCE:8}
+  p-hash-distance: ${PHOTO_ANALYSIS_PHASH_DISTANCE:12}
+  min-sharpness: ${PHOTO_ANALYSIS_MIN_SHARPNESS:35.0}
+  min-brightness: ${PHOTO_ANALYSIS_MIN_BRIGHTNESS:20.0}
+  max-brightness: ${PHOTO_ANALYSIS_MAX_BRIGHTNESS:235.0}
+  face-cascade-path: ${PHOTO_FACE_CASCADE_PATH:}
+  algorithm-version: ${PHOTO_ANALYSIS_ALGORITHM_VERSION:opencv-v1}
+
 mybatis-plus:
   type-handlers-package: com.pics2text.job.infrastructure.persistence
   configuration:
