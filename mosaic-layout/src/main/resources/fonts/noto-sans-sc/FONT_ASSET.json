@@ -1,0 +1,11 @@
+{
+  "id": "noto-sans-sc",
+  "family": "Noto Sans SC",
+  "version": "google-fonts-main-2026-09-27",
+  "file": "NotoSansSC-wght.ttf",
+  "license": "SIL Open Font License 1.1",
+  "licenseFile": "OFL.txt",
+  "source": "https://github.com/google/fonts/tree/main/ofl/notosanssc",
+  "upstreamFile": "NotoSansSC[wght].ttf",
+  "sha256": "a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da"
+}

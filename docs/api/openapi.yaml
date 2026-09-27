@@ -11,6 +11,7 @@ tags:
   - name: Users
   - name: Projects
   - name: Photos
+  - name: Layout
   - name: Jobs
   - name: Audit
 paths:
@@ -407,6 +408,75 @@ paths:
       parameters: [{ $ref: '#/components/parameters/ProjectId' }, { $ref: '#/components/parameters/PhotoId' }]
       responses:
         '200': { description: 已撤回, content: { application/json: { schema: { $ref: '#/components/schemas/Photo' } } } }
+  /api/v1/layout/fonts:
+    get:
+      tags: [Layout]
+      summary: 查询可用字体资产及许可证信息
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: 字体资产列表
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/FontAsset' } }
+  /api/v1/projects/{projectId}/text-masks:
+    post:
+      tags: [Layout]
+      summary: 创建文字蒙版和网格生成任务
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/ProjectId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateTextMaskRequest' }
+      responses:
+        '201': { description: 蒙版配置和异步作业已创建, content: { application/json: { schema: { $ref: '#/components/schemas/CreatedTextMask' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    get:
+      tags: [Layout]
+      summary: 分页查询项目文字蒙版
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/ProjectId' }
+        - { in: query, name: page, schema: { type: integer, minimum: 0, default: 0 } }
+        - { in: query, name: size, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        '200': { description: 蒙版列表, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/TextMask' } } } } }
+  /api/v1/projects/{projectId}/text-masks/{maskId}:
+    get:
+      tags: [Layout]
+      summary: 查询文字蒙版配置和生成结果
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/ProjectId' }, { $ref: '#/components/parameters/MaskId' }]
+      responses:
+        '200': { description: 文字蒙版, content: { application/json: { schema: { $ref: '#/components/schemas/TextMask' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/projects/{projectId}/text-masks/{maskId}/slots:
+    get:
+      tags: [Layout]
+      summary: 分页查询可放置照片的网格槽位
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/ProjectId' }
+        - { $ref: '#/components/parameters/MaskId' }
+        - { in: query, name: page, schema: { type: integer, minimum: 0, default: 0 } }
+        - { in: query, name: size, schema: { type: integer, minimum: 1, maximum: 1000, default: 200 } }
+      responses:
+        '200': { description: 网格槽位, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/TextMaskSlot' } } } } }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/projects/{projectId}/text-masks/{maskId}/preview-url:
+    post:
+      tags: [Layout]
+      summary: 获取灰度蒙版或网格调试图的私有下载 URL
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/ProjectId' }
+        - { $ref: '#/components/parameters/MaskId' }
+        - { in: query, name: debug, schema: { type: boolean, default: false } }
+      responses:
+        '200': { description: 预签名下载请求, content: { application/json: { schema: { $ref: '#/components/schemas/PresignedRequest' } } } }
+        '409': { $ref: '#/components/responses/Conflict' }
   /api/v1/projects/{projectId}/jobs:
     get:
       tags: [Jobs]
@@ -510,6 +580,11 @@ components:
     JobId:
       in: path
       name: jobId
+      required: true
+      schema: { type: string, format: uuid }
+    MaskId:
+      in: path
+      name: maskId
       required: true
       schema: { type: string, format: uuid }
   responses:
@@ -749,6 +824,99 @@ components:
         user: { $ref: '#/components/schemas/User' }
         role: { $ref: '#/components/schemas/ProjectRole' }
         createdAt: { type: string, format: date-time }
+    FontAsset:
+      type: object
+      properties:
+        id: { type: string }
+        family: { type: string }
+        version: { type: string }
+        license: { type: string }
+        source: { type: string, format: uri }
+        sha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+        minimumWeight: { type: integer }
+        maximumWeight: { type: integer }
+    CreateTextMaskRequest:
+      type: object
+      required: [name, text, direction, fontId, fontSize, fontWeight, letterSpacing,
+        lineSpacing, canvasWidth, canvasHeight, padding, gridStrategy, edgePolicy,
+        cellWidth, cellHeight, gap, coverageThreshold]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        text: { type: string, minLength: 1, maxLength: 400, description: 最多200个Unicode码点 }
+        direction: { type: string, enum: [HORIZONTAL, VERTICAL] }
+        fontId: { type: string, example: noto-sans-sc }
+        fontSize: { type: integer, minimum: 16, maximum: 2048 }
+        fontWeight: { type: integer, minimum: 100, maximum: 900 }
+        letterSpacing: { type: number, minimum: -20, maximum: 200 }
+        lineSpacing: { type: number, minimum: 0.5, maximum: 3 }
+        canvasWidth: { type: integer, minimum: 256, maximum: 4096 }
+        canvasHeight: { type: integer, minimum: 256, maximum: 4096 }
+        padding: { type: integer, minimum: 0, maximum: 2048 }
+        gridStrategy: { type: string, enum: [REGULAR, STAGGERED] }
+        edgePolicy: { type: string, enum: [STRICT, INCLUDE_PARTIAL] }
+        cellWidth: { type: integer, minimum: 4, maximum: 512 }
+        cellHeight: { type: integer, minimum: 4, maximum: 512 }
+        gap: { type: integer, minimum: 0, maximum: 128 }
+        coverageThreshold: { type: number, minimum: 0.5, maximum: 0.98 }
+    CreatedTextMask:
+      type: object
+      properties:
+        mask: { $ref: '#/components/schemas/TextMask' }
+        jobId: { type: string, format: uuid }
+    TextMask:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        projectId: { type: string, format: uuid }
+        name: { type: string }
+        text: { type: string }
+        direction: { type: string, enum: [HORIZONTAL, VERTICAL] }
+        fontId: { type: string }
+        fontVersion: { type: string }
+        fontSha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+        fontSize: { type: integer }
+        fontWeight: { type: integer }
+        letterSpacing: { type: number }
+        lineSpacing: { type: number }
+        canvasWidth: { type: integer }
+        canvasHeight: { type: integer }
+        padding: { type: integer }
+        gridStrategy: { type: string, enum: [REGULAR, STAGGERED] }
+        edgePolicy: { type: string, enum: [STRICT, INCLUDE_PARTIAL] }
+        cellWidth: { type: integer }
+        cellHeight: { type: integer }
+        gap: { type: integer }
+        coverageThreshold: { type: number }
+        status: { type: string, enum: [PENDING, PROCESSING, READY, FAILED] }
+        algorithmVersion: { type: [string, 'null'] }
+        contentHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+        boundsX: { type: [integer, 'null'] }
+        boundsY: { type: [integer, 'null'] }
+        boundsWidth: { type: [integer, 'null'] }
+        boundsHeight: { type: [integer, 'null'] }
+        estimatedStrokeWidth: { type: [number, 'null'] }
+        averageCoverage: { type: [number, 'null'] }
+        slotCount: { type: integer }
+        warningsJson: { type: string, description: 可读性和边界警告 JSON 数组 }
+        errorCode: { type: [string, 'null'] }
+        errorMessage: { type: [string, 'null'] }
+        createdBy: { type: string, format: uuid }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        completedAt: { type: [string, 'null'], format: date-time }
+    TextMaskSlot:
+      type: object
+      properties:
+        maskId: { type: string, format: uuid }
+        slotIndex: { type: integer, minimum: 0 }
+        rowIndex: { type: integer, minimum: 0 }
+        columnIndex: { type: integer, minimum: 0 }
+        x: { type: integer, minimum: 0 }
+        y: { type: integer, minimum: 0 }
+        width: { type: integer, minimum: 1 }
+        height: { type: integer, minimum: 1 }
+        coverage: { type: number, minimum: 0, maximum: 1 }
+        edge: { type: boolean }
     AuditLog:
       type: object
       properties:
@@ -777,7 +945,7 @@ components:
         projectId: { type: string, format: uuid }
         resourceType: { type: [string, 'null'] }
         resourceId: { type: [string, 'null'], format: uuid }
-        type: { type: string, enum: [PHOTO_ANALYSIS, LAYOUT_GENERATION, PRINT_RENDER, INFRASTRUCTURE_PROBE] }
+        type: { type: string, enum: [PHOTO_ANALYSIS, TEXT_MASK_GENERATION, LAYOUT_GENERATION, PRINT_RENDER, INFRASTRUCTURE_PROBE] }
         status: { $ref: '#/components/schemas/JobStatus' }
         progress: { type: integer, minimum: 0, maximum: 100 }
         currentAttempt: { type: integer, minimum: 0 }

@@ -2,6 +2,7 @@ package com.pics2text.job.domain;
 
 public enum JobType {
     PHOTO_ANALYSIS("analysis"),
+    TEXT_MASK_GENERATION("analysis"),
     LAYOUT_GENERATION("analysis"),
     PRINT_RENDER("render"),
     INFRASTRUCTURE_PROBE("analysis");
