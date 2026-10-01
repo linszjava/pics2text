@@ -13,6 +13,8 @@ dist/
 *.tsbuildinfo
 mosaic-web/vite.config.js
 mosaic-web/vite.config.d.ts
+mosaic-web/test-results/
+mosaic-web/playwright-report/
 
 # IDE
 .idea/

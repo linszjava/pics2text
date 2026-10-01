@@ -18,6 +18,11 @@ export interface PhotoSummary {
   analysisStatus: string;
   reviewStatus: string;
   duplicateOf: string | null;
+  failureCode?: string | null;
+  failureMessage?: string | null;
+  analysisErrorCode?: string | null;
+  analysisErrorMessage?: string | null;
+  retentionUntil?: string | null;
   createdAt: string;
 }
 
@@ -42,6 +47,11 @@ export interface RenderSummary {
   outputByteSize: number | null;
   errorMessage: string | null;
   createdAt: string;
+}
+
+export interface CreateRenderInput {
+  layoutId: string; dpi: number; bleedMm: number; tileSize: number;
+  compression: 'ZSTD' | 'LZW' | 'DEFLATE'; cropMarks: boolean; registrationMarks: boolean;
 }
 
 export interface UserSummary extends AuthenticatedUser {
@@ -161,6 +171,12 @@ export class OperationsApi {
       method: 'POST', body: JSON.stringify({ decision, note }),
     });
   }
+  withdrawPhoto(projectId: string, photoId: string): Promise<PhotoSummary> {
+    return this.request(`/api/v1/projects/${projectId}/photos/${photoId}/withdraw`, { method: 'POST' });
+  }
+  async deletePhoto(projectId: string, photoId: string): Promise<void> {
+    await this.request(`/api/v1/projects/${projectId}/photos/${photoId}`, { method: 'DELETE' });
+  }
   jobs(projectId: string): Promise<JobSummary[]> {
     return this.request(`/api/v1/projects/${projectId}/jobs?page=0&size=100`);
   }
@@ -172,6 +188,9 @@ export class OperationsApi {
   }
   renders(projectId: string): Promise<RenderSummary[]> {
     return this.request(`/api/v1/projects/${projectId}/print-renders?page=0&size=100`);
+  }
+  createRender(projectId: string, input: CreateRenderInput): Promise<{ render: RenderSummary; jobId: string; existing: boolean }> {
+    return this.request(`/api/v1/projects/${projectId}/print-renders`, { method: 'POST', body: JSON.stringify(input) });
   }
   decideRender(projectId: string, renderId: string, decision: 'APPROVED' | 'REJECTED', note: string): Promise<RenderSummary> {
     return this.request(`/api/v1/projects/${projectId}/print-renders/${renderId}/decision`, {

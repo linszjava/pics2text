@@ -37,6 +37,6 @@ export function SurfacePreviewPage() {
         <dt>Y 比例</dt><dd>{m.mapping.scaleYmmPerPx.toFixed(6)} mm/px</dd>
         <dt>槽位</dt><dd>{m.slots.length}</dd><dt>区域</dt><dd>{m.regions.length}</dd>
       </dl><Typography.Paragraph type="secondary">拖动旋转，滚轮缩放。红线表示接缝；红色区域为禁印区，蓝色为舱段，黄色为关键结构。</Typography.Paragraph>
-      {!data.textureUrl && <Alert type="warning" showIcon message="当前版本尚无 READY 的低清纹理，正在使用材质占位。" />}</aside></section>
+      {!data.textureUrl && <Alert type="warning" showIcon title="当前版本尚无 READY 的低清纹理，正在使用材质占位。" />}</aside></section>
   </main>;
 }

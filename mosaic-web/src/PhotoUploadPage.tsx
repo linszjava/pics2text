@@ -78,7 +78,7 @@ export function PhotoUploadPage({ api, projectId, photos, onChanged }: { api: Op
 
   if (!projectId) return <Card><Empty description="请先选择项目" /></Card>;
   return <Card title="照片批量上传" extra={<Tag color="blue">支持 JPEG / PNG / WebP</Tag>}>
-    <Alert type="info" showIcon message="浏览器先计算 SHA-256，文件随后直接上传到对象存储；大文件会自动分片，业务服务不转发图片内容。" />
+    <Alert type="info" showIcon title="浏览器先计算 SHA-256，文件随后直接上传到对象存储；大文件会自动分片，业务服务不转发图片内容。" />
     <Upload.Dragger {...uploadProps} className="photo-uploader">
       <p className="ant-upload-drag-icon"><InboxOutlined /></p>
       <p className="ant-upload-text">点击或拖拽照片到此区域</p>

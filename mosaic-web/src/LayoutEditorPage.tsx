@@ -240,7 +240,7 @@ export function LayoutEditorPage() {
       </aside>
     </section>
     <footer className="statusbar"><Typography.Text>{status}{pendingCount ? `（待保存 ${pendingCount}）` : ''}</Typography.Text>
-      <span>{error && <Alert type="error" showIcon message={error} />}</span>
+      <span>{error && <Alert type="error" showIcon title={error} />}</span>
       <Typography.Text type="secondary">当前视口 {assignments.length} 个槽位</Typography.Text></footer>
   </main>;
 }

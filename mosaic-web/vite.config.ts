@@ -7,5 +7,5 @@ export default defineConfig({
     port: 15173,
     proxy: { '/api': 'http://localhost:18080' },
   },
-  test: { environment: 'node' },
+  test: { environment: 'node', include: ['src/**/*.test.ts'] },
 });

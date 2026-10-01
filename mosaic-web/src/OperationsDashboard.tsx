@@ -122,7 +122,7 @@ export function OperationsDashboard() {
           <Button icon={<LogoutOutlined />} onClick={() => void logout()}>退出</Button></Space>
       </Header>
       <Content className="ops-content">
-        {error && <Alert type="error" showIcon closable message={error} onClose={() => setError('')} />}
+        {error && <Alert type="error" showIcon closable title={error} onClose={() => setError('')} />}
         {!loading && !['projects', 'users', 'audit', 'overview'].includes(section) && <ProjectSwitcher
           projectId={projectId} projects={projects} project={project} onChange={setProjectId} />}
         {loading ? <Skeleton active /> : section === 'projects'
@@ -139,7 +139,7 @@ export function OperationsDashboard() {
           : section === 'tasks'
             ? <TaskCenterPage api={api} projectId={projectId} jobs={jobs} loading={detailLoading} onChanged={setJobs} />
           : section === 'renders'
-            ? <RenderDeliveryPage api={api} projectId={projectId} renders={renders} loading={detailLoading} onChanged={setRenders} />
+            ? <RenderDeliveryPage api={api} projectId={projectId} renders={renders} layouts={layouts} loading={detailLoading} onChanged={setRenders} />
           : section === 'users' && user?.globalRole === 'ADMIN'
             ? <UserManagement api={api} currentUserId={user.id} />
             : section === 'audit' && user?.globalRole === 'ADMIN'
@@ -165,7 +165,7 @@ export function OperationsDashboard() {
         </>}
       </Content>
     </Layout>
-    <Drawer className="ops-mobile-drawer" title="Pics2Text" placement="left" width={270} open={mobileMenuOpen} onClose={() => setMobileMenuOpen(false)}>
+    <Drawer className="ops-mobile-drawer" title="Pics2Text" placement="left" size={270} open={mobileMenuOpen} onClose={() => setMobileMenuOpen(false)}>
       <Menu mode="inline" selectedKeys={[section]} items={menuItems} onClick={({ key }) => selectSection(key)} />
     </Drawer>
   </Layout>;

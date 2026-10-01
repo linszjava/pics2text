@@ -50,8 +50,8 @@ export function LoginPage({ returnTo }: { returnTo?: string }) {
       <Segmented block value={mode} onChange={switchMode} options={[
         { label: '账号登录', value: 'login' }, { label: '创建账号', value: 'register' },
       ]} />
-      {params.get('reason') === 'expired' && <Alert type="warning" showIcon message="原登录状态已失效，请重新登录。" />}
-      {error && <Alert type="error" showIcon message={error} />}
+      {params.get('reason') === 'expired' && <Alert type="warning" showIcon title="原登录状态已失效，请重新登录。" />}
+      {error && <Alert type="error" showIcon title={error} />}
       <Form form={form} layout="vertical" requiredMark={false} onFinish={(values) => void submit(values)}
         autoComplete="off" size="large">
         {mode === 'register' && <Form.Item label="显示名称" name="displayName"
