@@ -52,3 +52,30 @@ export interface ApiFailure extends Error {
   status: number;
   code?: string;
 }
+
+export interface SurfaceManifest {
+  schemaVersion: string;
+  unit: 'MILLIMETER';
+  layoutId: string;
+  layoutVersionId: string;
+  templateId: string;
+  templateVersion: number;
+  geometryHash: string;
+  surface: { type: 'CYLINDER'; diameterMm: number; radiusMm: number; circumferenceMm: number;
+    axialLengthMm: number; seamXmm: number; seamSafetyMm: number };
+  canvas: { widthPx: number; heightPx: number };
+  mapping: { originXmm: number; originYmm: number; printWidthMm: number; printHeightMm: number;
+    scaleXmmPerPx: number; scaleYmmPerPx: number };
+  regions: Array<{ regionIndex: number; type: 'NO_PRINT' | 'COMPARTMENT' | 'STRUCTURE' | 'REFERENCE';
+    name: string; blocking: boolean; xMm: number; yMm: number; widthMm: number; heightMm: number }>;
+  slots: Array<unknown>;
+}
+
+export interface SurfacePreviewData {
+  manifest: SurfaceManifest;
+  manifestHash: string;
+  validationStatus: 'VALID' | 'INVALID';
+  violationCount: number;
+  layoutPreviewId: string | null;
+  textureUrl: string | null;
+}

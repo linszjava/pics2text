@@ -2,7 +2,7 @@
 
 将大量照片自动排版为指定文字，并支持曲面载体预览及超大印刷文件输出的平台。
 
-P00 工程基础至 P07 布局版本与人工编辑已经完成，下一阶段为 P08 载体表面与三维预览。代码采用模块化单体架构，计算密集型任务通过独立 Worker 进程运行；在业务边界和容量要求尚未稳定前不拆分微服务。
+P00 工程基础至 P08 载体表面与三维预览已经完成，下一阶段为 P09 高清渲染与印刷交付。代码采用模块化单体架构，计算密集型任务通过独立 Worker 进程运行；在业务边界和容量要求尚未稳定前不拆分微服务。
 
 ## 项目文档
 
@@ -38,7 +38,7 @@ P00 工程基础至 P07 布局版本与人工编辑已经完成，下一阶段�
 | `mosaic-api` | HTTP API、认证入口和数据库迁移 |
 | `mosaic-analysis-worker` | 照片分析与布局计算进程 |
 | `mosaic-render-worker` | 高清渲染进程 |
-| `mosaic-web` | React + TypeScript + PixiJS 布局编辑器 |
+| `mosaic-web` | React + TypeScript + PixiJS 布局编辑器与 Three.js 曲面预览 |
 
 每个业务模块后续在内部按 `domain`、`application`、`infrastructure`、`interfaces` 分层。领域层不得依赖基础设施层或接口层，该约束由 ArchUnit 测试持续校验。
 
@@ -72,6 +72,7 @@ make web-dev
 | Analysis Worker 健康检查 | `http://localhost:18081/actuator/health` |
 | Render Worker 健康检查 | `http://localhost:18082/actuator/health` |
 | 布局编辑器 | `http://localhost:15173/?projectId=<项目UUID>&layoutId=<布局UUID>` |
+| 圆柱三维预览 | `http://localhost:15173/?view=surface&projectId=<项目UUID>&layoutId=<布局UUID>` |
 | PostgreSQL | `localhost:15432` |
 | Redis | `localhost:16379` |
 | RabbitMQ 管理台 | `http://localhost:15672` |
@@ -100,6 +101,8 @@ Java 应用可通过环境变量覆盖默认连接信息，例如 `DB_URL`、`DB
 文字蒙版通过 `TEXT_MASK_GENERATION` 作业异步生成，支持横排、竖排、100—900 字重、字距/行距、规则网格和错位网格。生成结果包括灰度 PNG、带槽位框的调试 PNG、内容边界、估算笔画宽度、覆盖率、可读性警告和持久化网格槽位。仓库内置 Noto Sans SC 可变字体，并同时保存 OFL 许可证、来源、版本标识和 SHA-256；蒙版配置摘要包含算法版本与字体校验值，避免字体升级造成静默漂移。
 
 自动布局可导入为可编辑草稿。每批交换、替换或裁剪命令都记录操作者、时间、前后值，并生成完整的不可变 `LayoutVersion`；客户端批次 UUID 支持失败重放，数据库乐观锁防止并发静默覆盖。布局必须先锁定才能发布，锁定或已发布布局不可修改。PixiJS 编辑器按视口查询槽位并分批加载私有缩略图，支持缩放、平移、按槽位或照片定位、本地草稿恢复和自动保存；Render Worker 可根据版本生成最长边不超过 2048 像素的低分辨率颜色预览。
+
+载体表面使用毫米作为唯一物理单位，圆柱模板可配置直径、轴向长度、接缝、安全边距、禁印区、舱段和关键结构。锁定布局映射后会生成不可变的物理坐标、UV 坐标和三维坐标清单；接缝、安全边距或禁印区冲突会阻止发布。发布会将已验证清单与最终不可变版本绑定，Three.js 三维预览和后续 P09 印刷渲染共享该坐标源。
 
 ## 首次管理员初始化
 

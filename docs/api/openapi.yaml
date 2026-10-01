@@ -12,6 +12,7 @@ tags:
   - name: Projects
   - name: Photos
   - name: Layout
+  - name: Surface
   - name: Jobs
   - name: Audit
 paths:
@@ -622,6 +623,7 @@ paths:
     post:
       tags: [Layout]
       summary: 发布已锁定布局并固化发布版本
+      description: 当前锁定版本必须已经绑定 ACTIVE 曲面模板，并通过接缝、安全边距和禁印区域校验。
       security: [{ bearerAuth: [] }]
       parameters: [{ $ref: '#/components/parameters/ProjectId' }, { $ref: '#/components/parameters/EditableLayoutId' }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/LayoutTransitionRequest' } } } }
@@ -662,6 +664,65 @@ paths:
       security: [{ bearerAuth: [] }]
       parameters: [{ $ref: '#/components/parameters/ProjectId' }, { $ref: '#/components/parameters/EditableLayoutId' }, { $ref: '#/components/parameters/PreviewId' }]
       responses: { '200': { description: 预签名下载请求, content: { application/json: { schema: { $ref: '#/components/schemas/PresignedRequest' } } } }, '409': { $ref: '#/components/responses/Conflict' } }
+  /api/v1/projects/{projectId}/surface-templates:
+    post:
+      tags: [Surface]
+      summary: 创建不可变圆柱曲面模板
+      description: 使用毫米单位，周长由直径计算；区域可标记禁印区、舱段、关键结构和参考信息。
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/ProjectId' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CreateSurfaceTemplateRequest' } } } }
+      responses:
+        '201': { description: 曲面模板, content: { application/json: { schema: { $ref: '#/components/schemas/SurfaceTemplateView' } } } }
+        '409': { $ref: '#/components/responses/Conflict' }
+    get:
+      tags: [Surface]
+      summary: 分页查询项目曲面模板
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/ProjectId' }
+        - { in: query, name: page, schema: { type: integer, minimum: 0, default: 0 } }
+        - { in: query, name: size, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        '200': { description: 曲面模板列表, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/SurfaceTemplateView' } } } } }
+  /api/v1/projects/{projectId}/surface-templates/{templateId}:
+    get:
+      tags: [Surface]
+      summary: 查询曲面模板、禁印区与结构标记
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/ProjectId' }, { $ref: '#/components/parameters/SurfaceTemplateId' }]
+      responses:
+        '200': { description: 曲面模板, content: { application/json: { schema: { $ref: '#/components/schemas/SurfaceTemplateView' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/projects/{projectId}/editable-layouts/{editableLayoutId}/surface-binding:
+    post:
+      tags: [Surface]
+      summary: 将当前锁定版本映射到曲面并执行发布前校验
+      description: 固化像素到毫米比例、UV/三维坐标清单和语义摘要。INVALID 结果会阻止布局发布。
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/ProjectId' }, { $ref: '#/components/parameters/EditableLayoutId' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/BindSurfaceRequest' } } } }
+      responses:
+        '200': { description: 校验后的曲面绑定, content: { application/json: { schema: { $ref: '#/components/schemas/SurfaceBindingView' } } } }
+        '409': { $ref: '#/components/responses/Conflict' }
+    get:
+      tags: [Surface]
+      summary: 查询布局的曲面绑定与校验结果
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/ProjectId' }, { $ref: '#/components/parameters/EditableLayoutId' }]
+      responses:
+        '200': { description: 曲面绑定, content: { application/json: { schema: { $ref: '#/components/schemas/SurfaceBindingView' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/projects/{projectId}/editable-layouts/{editableLayoutId}/surface-preview-data:
+    get:
+      tags: [Surface]
+      summary: 获取 Three.js 三维预览所需的不可变坐标清单和纹理 URL
+      description: 坐标清单也是 P09 最终渲染的唯一曲面坐标来源；仅在已有 READY 低清预览时返回私有纹理 URL。
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/ProjectId' }, { $ref: '#/components/parameters/EditableLayoutId' }]
+      responses:
+        '200': { description: 三维预览数据, content: { application/json: { schema: { $ref: '#/components/schemas/SurfacePreviewData' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/projects/{projectId}/jobs:
     get:
       tags: [Jobs]
@@ -785,6 +846,11 @@ components:
     PreviewId:
       in: path
       name: previewId
+      required: true
+      schema: { type: string, format: uuid }
+    SurfaceTemplateId:
+      in: path
+      name: templateId
       required: true
       schema: { type: string, format: uuid }
   responses:
@@ -1377,6 +1443,119 @@ components:
         preview: { $ref: '#/components/schemas/LayoutPreview' }
         jobId: { type: [string, 'null'], format: uuid, description: 已存在可复用预览时为空 }
         existing: { type: boolean }
+    SurfaceRegionInput:
+      type: object
+      required: [type, name, xMm, yMm, widthMm, heightMm]
+      properties:
+        type: { type: string, enum: [NO_PRINT, COMPARTMENT, STRUCTURE, REFERENCE] }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        xMm: { type: number, minimum: 0 }
+        yMm: { type: number, minimum: 0 }
+        widthMm: { type: number, exclusiveMinimum: 0 }
+        heightMm: { type: number, exclusiveMinimum: 0 }
+        metadata: { type: object, additionalProperties: true }
+    CreateSurfaceTemplateRequest:
+      type: object
+      required: [name, diameterMm, axialLengthMm, seamXmm, seamSafetyMm, safeTopMm,
+        safeRightMm, safeBottomMm, safeLeftMm, regions]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        diameterMm: { type: number, exclusiveMinimum: 0 }
+        axialLengthMm: { type: number, exclusiveMinimum: 0 }
+        seamXmm: { type: number, minimum: 0 }
+        seamSafetyMm: { type: number, minimum: 0 }
+        safeTopMm: { type: number, minimum: 0 }
+        safeRightMm: { type: number, minimum: 0 }
+        safeBottomMm: { type: number, minimum: 0 }
+        safeLeftMm: { type: number, minimum: 0 }
+        regions: { type: array, maxItems: 500, items: { $ref: '#/components/schemas/SurfaceRegionInput' } }
+    SurfaceTemplate:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        projectId: { type: string, format: uuid }
+        name: { type: string }
+        surfaceType: { type: string, enum: [CYLINDER] }
+        unit: { type: string, enum: [MILLIMETER] }
+        diameterMm: { type: number }
+        circumferenceMm: { type: number }
+        axialLengthMm: { type: number }
+        seamXmm: { type: number }
+        seamSafetyMm: { type: number }
+        safeTopMm: { type: number }
+        safeRightMm: { type: number }
+        safeBottomMm: { type: number }
+        safeLeftMm: { type: number }
+        templateVersion: { type: integer, minimum: 1 }
+        status: { type: string, enum: [ACTIVE, ARCHIVED] }
+        geometryHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+        createdBy: { type: string, format: uuid }
+        createdAt: { type: string, format: date-time }
+    SurfaceRegion:
+      type: object
+      properties:
+        templateId: { type: string, format: uuid }
+        regionIndex: { type: integer, minimum: 0 }
+        regionType: { type: string, enum: [NO_PRINT, COMPARTMENT, STRUCTURE, REFERENCE] }
+        name: { type: string }
+        xMm: { type: number }
+        yMm: { type: number }
+        widthMm: { type: number }
+        heightMm: { type: number }
+        blocking: { type: boolean }
+        metadataJson: { type: string }
+    SurfaceTemplateView:
+      type: object
+      properties:
+        template: { $ref: '#/components/schemas/SurfaceTemplate' }
+        regions: { type: array, items: { $ref: '#/components/schemas/SurfaceRegion' } }
+    BindSurfaceRequest:
+      type: object
+      required: [templateId, layoutVersionId, originXmm, originYmm, printWidthMm, printHeightMm]
+      properties:
+        templateId: { type: string, format: uuid }
+        layoutVersionId: { type: string, format: uuid }
+        originXmm: { type: number, minimum: 0 }
+        originYmm: { type: number, minimum: 0 }
+        printWidthMm: { type: number, exclusiveMinimum: 0 }
+        printHeightMm: { type: number, exclusiveMinimum: 0 }
+    SurfaceBinding:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        projectId: { type: string, format: uuid }
+        layoutId: { type: string, format: uuid }
+        layoutVersionId: { type: string, format: uuid }
+        templateId: { type: string, format: uuid }
+        originXmm: { type: number }
+        originYmm: { type: number }
+        printWidthMm: { type: number }
+        printHeightMm: { type: number }
+        scaleXmmPerPx: { type: number }
+        scaleYmmPerPx: { type: number }
+        validationStatus: { type: string, enum: [VALID, INVALID] }
+        violationCount: { type: integer, minimum: 0 }
+        violationsJson: { type: string }
+        coordinateManifestJson: { type: string, description: P09复用的不可变坐标清单 }
+        manifestHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+        validatedBy: { type: string, format: uuid }
+        validatedAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    SurfaceBindingView:
+      type: object
+      properties:
+        binding: { $ref: '#/components/schemas/SurfaceBinding' }
+        violations: { type: array, items: { type: object, additionalProperties: true } }
+    SurfacePreviewData:
+      type: object
+      properties:
+        manifest: { type: object, additionalProperties: true, description: surface-coordinate-manifest-v1 }
+        manifestHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+        validationStatus: { type: string, enum: [VALID, INVALID] }
+        violationCount: { type: integer, minimum: 0 }
+        layoutPreviewId: { type: [string, 'null'], format: uuid }
+        textureUrl: { type: [string, 'null'], format: uri }
     AuditLog:
       type: object
       properties:

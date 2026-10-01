@@ -3,6 +3,7 @@
 body { margin: 0; min-width: 900px; }
 button, input { font: inherit; }
 button { border: 1px solid #3a4655; border-radius: 6px; padding: 7px 12px; color: #e8edf3; background: #202833; cursor: pointer; }
+.button-link { border: 1px solid #3a4655; border-radius: 6px; padding: 7px 12px; color: #e8edf3; background: #202833; text-decoration: none; white-space: nowrap; }
 button:hover:not(:disabled) { background: #2b3745; }
 button:disabled, fieldset:disabled { opacity: .52; cursor: not-allowed; }
 input { min-width: 0; border: 1px solid #3a4655; border-radius: 5px; padding: 7px 9px; color: #e8edf3; background: #10161e; }
@@ -28,4 +29,8 @@ input { min-width: 0; border: 1px solid #3a4655; border-radius: 5px; padding: 7p
 .statusbar { display: grid; grid-template-columns: 1fr 2fr auto; gap: 12px; min-height: 35px; align-items: center; padding: 7px 14px; border-top: 1px solid #26303c; color: #91a0b3; background: #171d26; }
 .error { color: #ff8e8e; text-align: center; }
 .setup-panel { max-width: 720px; margin: 15vh auto; padding: 30px; border: 1px solid #293442; border-radius: 10px; background: #171d26; }
+.surface-shell { display: grid; grid-template-rows: auto minmax(0, 1fr); height: 100vh; }
+.surface-workspace { display: grid; grid-template-columns: minmax(0, 1fr) 310px; min-height: 0; }
+.surface-canvas { min-width: 0; min-height: 0; overflow: hidden; }
+.surface-canvas canvas { display: block; }
 code { color: #9fcbff; }

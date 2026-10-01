@@ -51,10 +51,12 @@ public class LayoutEditorService {
     private final ObjectMapper objectMapper;
     private final ObjectStorageGateway storage;
     private final AuditService audit;
+    private final SurfaceApplicationService surfaces;
 
     public LayoutEditorService(LayoutEditorMapper mapper, AutoLayoutMapper autoLayoutMapper,
             TextMaskMapper maskMapper, ProjectAccessService access, JobCoordinator jobs,
-            ObjectMapper objectMapper, ObjectStorageGateway storage, AuditService audit) {
+            ObjectMapper objectMapper, ObjectStorageGateway storage, AuditService audit,
+            SurfaceApplicationService surfaces) {
         this.mapper = mapper;
         this.autoLayoutMapper = autoLayoutMapper;
         this.maskMapper = maskMapper;
@@ -63,6 +65,7 @@ public class LayoutEditorService {
         this.objectMapper = objectMapper;
         this.storage = storage;
         this.audit = audit;
+        this.surfaces = surfaces;
     }
 
     @Transactional
@@ -265,6 +268,7 @@ public class LayoutEditorService {
         } catch (IllegalStateException exception) {
             throw conflict("LAYOUT_STATE_INVALID", exception.getMessage());
         }
+        surfaces.requirePublishable(projectId, layoutId, layout.getCurrentVersionId());
         Instant now = Instant.now();
         if (mapper.publish(layoutId, expectedLockVersion, actor.id(), now) == 0) {
             throw conflict("LAYOUT_EDIT_CONFLICT", "布局状态或锁版本已经变化");
@@ -272,6 +276,8 @@ public class LayoutEditorService {
         EditableLayoutEntity published = mapper.findLayout(layoutId);
         LayoutVersionEntity version = createVersion(published, LayoutVersionReason.PUBLISH,
                 null, note, actor.id(), now);
+        surfaces.promotePublishedVersion(projectId, layoutId, layout.getCurrentVersionId(),
+                version.id(), actor.id(), now);
         mapper.setPublishedVersion(layoutId, version.id());
         audit.record(actor.id(), "LAYOUT_PUBLISH", "LAYOUT_VERSION", version.id().toString(), true);
         return new TransitionResult(mapper.findLayout(layoutId), version);

@@ -1,4 +1,5 @@
-import type { Assignment, EditCommand, EditResponse, EditableLayout, PhotoPreviewUrl } from './types';
+import type { Assignment, EditCommand, EditResponse, EditableLayout, PhotoPreviewUrl,
+  SurfacePreviewData } from './types';
 
 export interface ViewportQuery {
   minX: number;
@@ -35,6 +36,10 @@ export class LayoutApi {
       method: 'POST',
       body: JSON.stringify({ expectedLockVersion, clientBatchId, note: '编辑器自动保存', commands }),
     });
+  }
+
+  surfacePreviewData(projectId: string, layoutId: string): Promise<SurfacePreviewData> {
+    return this.request(`/api/v1/projects/${projectId}/editable-layouts/${layoutId}/surface-preview-data`);
   }
 
   private async request<T>(path: string, init: RequestInit = {}): Promise<T> {

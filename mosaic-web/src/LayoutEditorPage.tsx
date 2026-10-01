@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { LayoutApi, type ViewportQuery } from './api';
+import { authToken } from './auth';
 import { DraftRecovery, type PendingDraft } from './draftRecovery';
 import { PixiLayoutCanvas, type CanvasHandle } from './PixiLayoutCanvas';
 import type { ApiFailure, Assignment, EditCommand, EditableLayout } from './types';
@@ -10,7 +11,7 @@ export function LayoutEditorPage() {
   const params = useMemo(() => new URLSearchParams(window.location.search), []);
   const projectId = params.get('projectId') ?? '';
   const layoutId = params.get('layoutId') ?? '';
-  const token = localStorage.getItem('pics2text.token') ?? '';
+  const token = authToken();
   const api = useMemo(() => new LayoutApi('', token), [token]);
   const recovery = useMemo(() => new DraftRecovery(localStorage,
     `pics2text.layout-draft.${projectId}.${layoutId}`), [projectId, layoutId]);
@@ -199,6 +200,7 @@ export function LayoutEditorPage() {
       <div><strong>{layout.name}</strong><span className={`state ${layout.state.toLowerCase()}`}>{layout.state}</span>
         <small>版本 {layout.currentVersionNumber} · 修订 {layout.currentRevision}</small></div>
       <div className="toolbar">
+        <a className="button-link" href={`?projectId=${projectId}&layoutId=${layoutId}&view=surface`}>三维预览</a>
         <button onClick={() => canvasRef.current?.zoom(1.2)}>放大</button>
         <button onClick={() => canvasRef.current?.zoom(1 / 1.2)}>缩小</button>
         <button onClick={() => canvasRef.current?.fit()}>适应画布</button>
