@@ -51,6 +51,7 @@ class AuthenticationServiceTest {
                 bootstrapMapper,
                 request,
                 "bootstrap-secret",
+                true,
                 3600);
     }
 
@@ -97,6 +98,20 @@ class AuthenticationServiceTest {
         verify(userService, never()).create(anyString(), anyString(), anyString(), any());
     }
 
+    @Test
+    void registrationAlwaysCreatesARegularUser() {
+        User registered = activeUser("new-user", GlobalRole.USER);
+        when(userService.create("new-user", "Strong-Pass-2026!", "新用户", GlobalRole.USER))
+                .thenReturn(registered);
+
+        User result = service.register("new-user", "Strong-Pass-2026!", "新用户");
+
+        assertEquals(registered, result);
+        verify(userService).create("new-user", "Strong-Pass-2026!", "新用户", GlobalRole.USER);
+        verify(auditService).record(
+                registered.id(), "USER_REGISTER", "USER", registered.id().toString(), true);
+    }
+
     private User user(UserStatus status) {
         Instant now = Instant.now();
         return new User(
@@ -108,5 +123,11 @@ class AuthenticationServiceTest {
                 status,
                 now,
                 now);
+    }
+
+    private User activeUser(String username, GlobalRole role) {
+        Instant now = Instant.now();
+        return new User(
+                UUID.randomUUID(), username, "hash", "新用户", role, UserStatus.ACTIVE, now, now);
     }
 }

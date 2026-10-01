@@ -1,5 +1,6 @@
 import type { Assignment, EditCommand, EditResponse, EditableLayout, PhotoPreviewUrl,
   SurfacePreviewData } from './types';
+import { clearSession, redirectToLogin } from './auth';
 
 export interface ViewportQuery {
   minX: number;
@@ -52,6 +53,10 @@ export class LayoutApi {
       },
     });
     if (!response.ok) {
+      if (response.status === 401) {
+        clearSession();
+        redirectToLogin();
+      }
       const body = await response.json().catch(() => ({}));
       const failure = new Error(body.message ?? `请求失败：${response.status}`) as Error & { status: number; code?: string };
       failure.status = response.status;

@@ -68,8 +68,61 @@ services:
       retries: 20
     restart: unless-stopped
 
+  render-worker:
+    profiles: ["workers"]
+    build:
+      context: .
+      dockerfile: mosaic-render-worker/Dockerfile
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-pics2text}
+      DB_USERNAME: ${POSTGRES_USER:-pics2text}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-pics2text_dev}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_USERNAME: ${RABBITMQ_USER:-pics2text}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-pics2text_dev}
+      S3_ENDPOINT: http://object-storage:8333
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-pics2text}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-pics2text_dev_secret}
+      S3_BUCKET: ${S3_BUCKET:-pics2text}
+      PRINT_RENDER_TEMP_ROOT: /var/tmp/pics2text-render
+      PRINT_RENDER_PYTHON: /usr/bin/python3
+      PRINT_RENDER_SCRIPT: /opt/pics2text/render_print.py
+      PRINT_RENDER_SRGB_PROFILE: /usr/share/color/icc/sRGB.icc
+      PRINT_RENDER_MAX_SOURCE_BYTES: ${PRINT_RENDER_MAX_SOURCE_BYTES:-1073741824}
+      PRINT_RENDER_MAX_OUTPUT_BYTES: ${PRINT_RENDER_MAX_OUTPUT_BYTES:-1099511627776}
+      PRINT_RENDER_NATIVE_MEMORY_BYTES: ${PRINT_RENDER_NATIVE_MEMORY_BYTES:-536870912}
+      PRINT_RENDER_MAX_OPEN_FILES: ${PRINT_RENDER_MAX_OPEN_FILES:-256}
+      PRINT_RENDER_TIMEOUT: ${PRINT_RENDER_TIMEOUT:-6h}
+      PRINT_RENDER_STALE_TEMP_AGE: ${PRINT_RENDER_STALE_TEMP_AGE:-24h}
+      PRINT_RENDER_CLEANUP_INTERVAL: ${PRINT_RENDER_CLEANUP_INTERVAL:-1h}
+      TMPDIR: /var/tmp/pics2text-render
+      JAVA_TOOL_OPTIONS: -Djava.io.tmpdir=/var/tmp/pics2text-render
+    ports:
+      - "${RENDER_WORKER_PORT:-18082}:18082"
+    volumes:
+      - render-worker-temp:/var/tmp/pics2text-render
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      object-storage:
+        condition: service_healthy
+    read_only: true
+    mem_limit: ${RENDER_WORKER_MEMORY_LIMIT:-2g}
+    pids_limit: 256
+    ulimits:
+      nofile:
+        soft: 512
+        hard: 512
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
 volumes:
   postgres-data:
   redis-data:
   rabbitmq-data:
   object-storage-data:
+  render-worker-temp:

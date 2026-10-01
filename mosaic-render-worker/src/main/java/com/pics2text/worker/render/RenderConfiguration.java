@@ -11,7 +11,7 @@ import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.S3Configuration;
 
 @Configuration
-@EnableConfigurationProperties(RenderStorageProperties.class)
+@EnableConfigurationProperties({RenderStorageProperties.class, PrintRenderProperties.class})
 public class RenderConfiguration {
     @Bean(destroyMethod = "close")
     S3Client renderS3Client(RenderStorageProperties properties) {

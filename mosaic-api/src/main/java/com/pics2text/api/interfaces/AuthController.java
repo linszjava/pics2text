@@ -39,6 +39,13 @@ public class AuthController {
         return SessionResponse.from(authenticationService.login(request.username(), request.password()));
     }
 
+    @PostMapping("/register")
+    @ResponseStatus(HttpStatus.CREATED)
+    public UserResponse register(@Valid @RequestBody RegisterRequest request) {
+        return UserResponse.from(authenticationService.register(
+                request.username(), request.password(), request.displayName()));
+    }
+
     @PostMapping("/logout")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void logout() {
@@ -57,13 +64,19 @@ public class AuthController {
 
     public record BootstrapRequest(
             @NotBlank @Size(min = 3, max = 64) String username,
-            @NotBlank @Size(min = 12, max = 128) String password,
+            @NotBlank @Size(min = 5, max = 128) String password,
             @NotBlank @Size(max = 100) String displayName) {
     }
 
     public record LoginRequest(
             @NotBlank @Size(max = 64) String username,
             @NotBlank @Size(max = 128) String password) {
+    }
+
+    public record RegisterRequest(
+            @NotBlank @Size(min = 3, max = 64) String username,
+            @NotBlank @Size(min = 5, max = 128) String password,
+            @NotBlank @Size(max = 100) String displayName) {
     }
 
     public record SessionResponse(

@@ -1,4 +1,4 @@
-.PHONY: verify package web-install web-test web-build web-dev infra-up infra-down infra-status api analysis-worker render-worker
+.PHONY: verify package web-install web-test web-build web-dev infra-up infra-down infra-status api analysis-worker render-worker render-worker-docker
 
 verify:
 	./mvnw verify
@@ -38,3 +38,6 @@ analysis-worker:
 render-worker:
 	./mvnw -pl mosaic-render-worker -am package -DskipTests
 	java -jar mosaic-render-worker/target/mosaic-render-worker-0.1.0-SNAPSHOT.jar
+
+render-worker-docker:
+	docker compose --profile workers up -d --build render-worker

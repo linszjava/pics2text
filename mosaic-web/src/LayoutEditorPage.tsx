@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AimOutlined, CompressOutlined, LogoutOutlined, ZoomInOutlined, ZoomOutOutlined } from '@ant-design/icons';
+import { Alert, Button, Input, InputNumber, Space, Tag, Typography } from 'antd';
 import { LayoutApi, type ViewportQuery } from './api';
-import { authToken } from './auth';
+import { authToken, logout } from './auth';
 import { DraftRecovery, type PendingDraft } from './draftRecovery';
 import { PixiLayoutCanvas, type CanvasHandle } from './PixiLayoutCanvas';
 import type { ApiFailure, Assignment, EditCommand, EditableLayout } from './types';
@@ -197,45 +199,49 @@ export function LayoutEditorPage() {
 
   return <main className="editor-shell">
     <header className="topbar">
-      <div><strong>{layout.name}</strong><span className={`state ${layout.state.toLowerCase()}`}>{layout.state}</span>
-        <small>版本 {layout.currentVersionNumber} · 修订 {layout.currentRevision}</small></div>
-      <div className="toolbar">
-        <a className="button-link" href={`?projectId=${projectId}&layoutId=${layoutId}&view=surface`}>三维预览</a>
-        <button onClick={() => canvasRef.current?.zoom(1.2)}>放大</button>
-        <button onClick={() => canvasRef.current?.zoom(1 / 1.2)}>缩小</button>
-        <button onClick={() => canvasRef.current?.fit()}>适应画布</button>
-        <input value={locateValue} onChange={(event) => setLocateValue(event.target.value)}
+      <div><Typography.Title level={5}>{layout.name}</Typography.Title>
+        <Tag color={layout.state === 'PUBLISHED' ? 'success' : layout.state === 'LOCKED' ? 'warning' : 'processing'}>{layout.state}</Tag>
+        <Typography.Text type="secondary">版本 {layout.currentVersionNumber} · 修订 {layout.currentRevision}</Typography.Text></div>
+      <Space className="toolbar" wrap>
+        <Button href="?view=dashboard">工作台</Button>
+        <Button type="primary" href={`?projectId=${projectId}&layoutId=${layoutId}&view=surface`}>三维预览</Button>
+        <Button icon={<ZoomInOutlined />} onClick={() => canvasRef.current?.zoom(1.2)}>放大</Button>
+        <Button icon={<ZoomOutOutlined />} onClick={() => canvasRef.current?.zoom(1 / 1.2)}>缩小</Button>
+        <Button icon={<CompressOutlined />} onClick={() => canvasRef.current?.fit()}>适应画布</Button>
+        <Input value={locateValue} onChange={(event) => setLocateValue(event.target.value)}
           placeholder="槽位编号或照片 UUID" />
-        <button onClick={() => void locate().catch((cause) => setError(messageOf(cause)))}>定位</button>
-      </div>
+        <Button icon={<AimOutlined />} onClick={() => void locate().catch((cause) => setError(messageOf(cause)))}>定位</Button>
+        <Button icon={<LogoutOutlined />} onClick={() => void logout()}>退出</Button>
+      </Space>
     </header>
     <section className="workspace">
       <PixiLayoutCanvas ref={canvasRef} canvasWidth={layout.canvasWidth} canvasHeight={layout.canvasHeight}
         assignments={assignments} photoUrls={photoUrls} selectedSlot={selected?.slotIndex ?? null}
         onSelect={select} onViewport={debounceViewport(loadViewport)} />
       <aside className="inspector">
-        <h2>槽位编辑</h2>
-        {!selected && <p className="muted">点击画布中的照片开始编辑。</p>}
+        <Typography.Title level={5}>槽位编辑</Typography.Title>
+        {!selected && <Typography.Paragraph type="secondary">点击画布中的照片开始编辑。</Typography.Paragraph>}
         {selected && <>
           <dl><dt>槽位</dt><dd>{selected.slotIndex}</dd><dt>照片</dt><dd title={selected.photoId}>{selected.photoId}</dd></dl>
-          <label>与槽位交换<input disabled={!editable} inputMode="numeric" value={swapSlot}
+          <label>与槽位交换<Input disabled={!editable} inputMode="numeric" value={swapSlot}
             onChange={(event) => setSwapSlot(event.target.value)} /></label>
-          <button disabled={!editable} onClick={applySwap}>交换</button>
-          <label>替换为照片 UUID<input disabled={!editable} value={replacePhotoId}
+          <Button block disabled={!editable} onClick={applySwap}>交换</Button>
+          <label>替换为照片 UUID<Input disabled={!editable} value={replacePhotoId}
             onChange={(event) => setReplacePhotoId(event.target.value)} /></label>
-          <button disabled={!editable} onClick={applyReplace}>替换</button>
+          <Button block disabled={!editable} onClick={applyReplace}>替换</Button>
           <fieldset disabled={!editable}><legend>裁剪框（0–1）</legend>
             {(['x', 'y', 'width', 'height'] as const).map((key) => <label key={key}>{key}
-              <input type="number" min="0" max="1" step="0.01" value={crop[key]}
-                onChange={(event) => setCrop((current) => ({ ...current, [key]: Number(event.target.value) }))} />
+              <InputNumber min={0} max={1} step={0.01} value={crop[key]}
+                onChange={(value) => setCrop((current) => ({ ...current, [key]: value ?? 0 }))} />
             </label>)}
-            <button onClick={applyCrop}>应用裁剪</button>
+            <Button block type="primary" onClick={applyCrop}>应用裁剪</Button>
           </fieldset>
         </>}
       </aside>
     </section>
-    <footer className="statusbar"><span>{status}{pendingCount ? `（待保存 ${pendingCount}）` : ''}</span>
-      <span className="error">{error}</span><span>当前视口 {assignments.length} 个槽位</span></footer>
+    <footer className="statusbar"><Typography.Text>{status}{pendingCount ? `（待保存 ${pendingCount}）` : ''}</Typography.Text>
+      <span>{error && <Alert type="error" showIcon message={error} />}</span>
+      <Typography.Text type="secondary">当前视口 {assignments.length} 个槽位</Typography.Text></footer>
   </main>;
 }
 

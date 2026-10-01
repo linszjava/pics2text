@@ -20,7 +20,10 @@ public class SecurityConfiguration implements WebMvcConfigurer {
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(new SaInterceptor(handle -> StpUtil.checkLogin()))
                 .addPathPatterns("/api/**")
-                .excludePathPatterns("/api/v1/auth/login", "/api/v1/auth/bootstrap");
+                .excludePathPatterns(
+                        "/api/v1/auth/login",
+                        "/api/v1/auth/register",
+                        "/api/v1/auth/bootstrap");
     }
 
     @Bean

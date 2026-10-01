@@ -49,6 +49,7 @@ sa-token:
 
 identity:
   bootstrap-token: ${IDENTITY_BOOTSTRAP_TOKEN:pics2text-bootstrap-dev}
+  registration-enabled: ${IDENTITY_REGISTRATION_ENABLED:true}
   login:
     maximum-attempts: ${LOGIN_MAXIMUM_ATTEMPTS:5}
     lock-duration: ${LOGIN_LOCK_DURATION:15m}

@@ -25,6 +25,7 @@ public class AuthenticationService {
     private final BootstrapMapper bootstrapMapper;
     private final HttpServletRequest request;
     private final String bootstrapToken;
+    private final boolean registrationEnabled;
     private final long tokenTimeout;
 
     public AuthenticationService(
@@ -34,6 +35,7 @@ public class AuthenticationService {
             BootstrapMapper bootstrapMapper,
             HttpServletRequest request,
             @Value("${identity.bootstrap-token}") String bootstrapToken,
+            @Value("${identity.registration-enabled:true}") boolean registrationEnabled,
             @Value("${sa-token.timeout}") long tokenTimeout) {
         this.userService = userService;
         this.loginAttemptService = loginAttemptService;
@@ -41,6 +43,7 @@ public class AuthenticationService {
         this.bootstrapMapper = bootstrapMapper;
         this.request = request;
         this.bootstrapToken = bootstrapToken;
+        this.registrationEnabled = registrationEnabled;
         this.tokenTimeout = tokenTimeout;
     }
 
@@ -55,6 +58,16 @@ public class AuthenticationService {
         }
         User user = userService.create(username, password, displayName, GlobalRole.ADMIN);
         auditService.record(user.id(), "IDENTITY_BOOTSTRAP", "USER", user.id().toString(), true);
+        return user;
+    }
+
+    @Transactional
+    public User register(String username, String password, String displayName) {
+        if (!registrationEnabled) {
+            throw new ApiException("REGISTRATION_DISABLED", "当前环境未开放用户注册", HttpStatus.FORBIDDEN);
+        }
+        User user = userService.create(username, password, displayName, GlobalRole.USER);
+        auditService.record(user.id(), "USER_REGISTER", "USER", user.id().toString(), true);
         return user;
     }
 

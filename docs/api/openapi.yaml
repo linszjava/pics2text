@@ -13,6 +13,7 @@ tags:
   - name: Photos
   - name: Layout
   - name: Surface
+  - name: Rendering
   - name: Jobs
   - name: Audit
 paths:
@@ -60,6 +61,24 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ApiError' }
+  /api/v1/auth/register:
+    post:
+      tags: [Authentication]
+      summary: 注册普通用户
+      description: 仅创建 USER 角色；可通过 IDENTITY_REGISTRATION_ENABLED 关闭公开注册。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterRequest' }
+      responses:
+        '201':
+          description: 注册成功
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
   /api/v1/auth/logout:
     post:
       tags: [Authentication]
@@ -723,6 +742,61 @@ paths:
       responses:
         '200': { description: 三维预览数据, content: { application/json: { schema: { $ref: '#/components/schemas/SurfacePreviewData' } } } }
         '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/projects/{projectId}/print-renders:
+    post:
+      tags: [Rendering]
+      summary: 为已发布布局创建高清印刷渲染
+      description: 固化不可变输入和瓦片空间索引并创建 PRINT_RENDER 作业；相同输入摘要会幂等返回已有任务。
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/ProjectId' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CreatePrintRenderRequest' } } } }
+      responses:
+        '201': { description: 渲染及异步作业已创建, content: { application/json: { schema: { $ref: '#/components/schemas/CreatedPrintRender' } } } }
+        '409': { $ref: '#/components/responses/Conflict' }
+    get:
+      tags: [Rendering]
+      summary: 分页查询印刷渲染
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/ProjectId' }
+        - { in: query, name: page, schema: { type: integer, minimum: 0, default: 0 } }
+        - { in: query, name: size, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        '200': { description: 渲染列表, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/PrintRender' } } } } }
+  /api/v1/projects/{projectId}/print-renders/{renderId}:
+    get:
+      tags: [Rendering]
+      summary: 查询印刷渲染状态和校验摘要
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/ProjectId' }
+        - { in: path, name: renderId, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: 渲染详情, content: { application/json: { schema: { $ref: '#/components/schemas/PrintRender' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/projects/{projectId}/print-renders/{renderId}/decision:
+    post:
+      tags: [Rendering]
+      summary: 审批或驳回待审批印刷成品
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/ProjectId' }
+        - { in: path, name: renderId, required: true, schema: { type: string, format: uuid } }
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/PrintRenderDecisionRequest' } } } }
+      responses:
+        '200': { description: 审批后的渲染, content: { application/json: { schema: { $ref: '#/components/schemas/PrintRender' } } } }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/projects/{projectId}/print-renders/{renderId}/download-url:
+    post:
+      tags: [Rendering]
+      summary: 获取审批通过成品的私有下载 URL
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/ProjectId' }
+        - { in: path, name: renderId, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: 预签名下载请求, content: { application/json: { schema: { $ref: '#/components/schemas/PresignedRequest' } } } }
+        '409': { $ref: '#/components/responses/Conflict' }
   /api/v1/projects/{projectId}/jobs:
     get:
       tags: [Jobs]
@@ -880,7 +954,7 @@ components:
       required: [username, password, displayName]
       properties:
         username: { type: string, minLength: 3, maxLength: 64 }
-        password: { type: string, format: password, minLength: 12, maxLength: 128 }
+        password: { type: string, format: password, minLength: 5, maxLength: 128 }
         displayName: { type: string, minLength: 1, maxLength: 100 }
     LoginRequest:
       type: object
@@ -888,12 +962,19 @@ components:
       properties:
         username: { type: string, maxLength: 64 }
         password: { type: string, format: password, maxLength: 128 }
+    RegisterRequest:
+      type: object
+      required: [username, password, displayName]
+      properties:
+        username: { type: string, minLength: 3, maxLength: 64 }
+        password: { type: string, format: password, minLength: 5, maxLength: 128 }
+        displayName: { type: string, minLength: 1, maxLength: 100 }
     CreateUserRequest:
       type: object
       required: [username, password, displayName, globalRole]
       properties:
         username: { type: string, minLength: 3, maxLength: 64 }
-        password: { type: string, format: password, minLength: 12, maxLength: 128 }
+        password: { type: string, format: password, minLength: 5, maxLength: 128 }
         displayName: { type: string, minLength: 1, maxLength: 100 }
         globalRole: { $ref: '#/components/schemas/GlobalRole' }
     Session:
@@ -1556,6 +1637,59 @@ components:
         violationCount: { type: integer, minimum: 0 }
         layoutPreviewId: { type: [string, 'null'], format: uuid }
         textureUrl: { type: [string, 'null'], format: uri }
+    CreatePrintRenderRequest:
+      type: object
+      required: [layoutId, dpi, bleedMm, tileSize, compression, cropMarks, registrationMarks]
+      properties:
+        layoutId: { type: string, format: uuid }
+        dpi: { type: integer, minimum: 72, maximum: 2400 }
+        bleedMm: { type: number, minimum: 0 }
+        tileSize: { type: integer, minimum: 128, maximum: 8192 }
+        compression: { type: string, enum: [ZSTD, LZW, DEFLATE] }
+        cropMarks: { type: boolean }
+        registrationMarks: { type: boolean }
+    PrintRenderDecisionRequest:
+      type: object
+      required: [decision, note]
+      properties:
+        decision: { type: string, enum: [APPROVED, REJECTED] }
+        note: { type: string, minLength: 1, maxLength: 500 }
+    CreatedPrintRender:
+      type: object
+      properties:
+        render: { $ref: '#/components/schemas/PrintRender' }
+        jobId: { type: string, format: uuid }
+        existing: { type: boolean }
+    PrintRender:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        projectId: { type: string, format: uuid }
+        layoutId: { type: string, format: uuid }
+        layoutVersionId: { type: string, format: uuid }
+        jobId: { type: [string, 'null'], format: uuid }
+        status: { type: string, enum: [PENDING, PROCESSING, READY_FOR_APPROVAL, APPROVED, REJECTED, FAILED] }
+        format: { type: string, enum: [BIGTIFF] }
+        dpi: { type: integer }
+        bleedMm: { type: number }
+        tileSize: { type: integer }
+        compression: { type: string, enum: [ZSTD, LZW, DEFLATE] }
+        colorProfile: { type: string, enum: [SRGB_IEC61966_2_1] }
+        cropMarks: { type: boolean }
+        registrationMarks: { type: boolean }
+        contentWidthPx: { type: integer }
+        contentHeightPx: { type: integer }
+        outputWidthPx: { type: integer }
+        outputHeightPx: { type: integer }
+        inputManifestHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+        outputSha256: { type: [string, 'null'], pattern: '^[0-9a-f]{64}$' }
+        outputByteSize: { type: [integer, 'null'], format: int64 }
+        outputManifestHash: { type: [string, 'null'], pattern: '^[0-9a-f]{64}$' }
+        errorCode: { type: [string, 'null'] }
+        errorMessage: { type: [string, 'null'] }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        completedAt: { type: [string, 'null'], format: date-time }
     AuditLog:
       type: object
       properties:

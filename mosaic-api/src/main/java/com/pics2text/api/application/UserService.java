@@ -45,7 +45,7 @@ public class UserService {
         if (!PasswordPolicy.valid(password)) {
             throw new ApiException(
                     "PASSWORD_WEAK",
-                    "密码需为12至128位，并包含大写字母、小写字母、数字和特殊字符",
+                    "密码需为5至128位",
                     HttpStatus.BAD_REQUEST);
         }
         String normalizedDisplayName = displayName == null ? "" : displayName.trim();

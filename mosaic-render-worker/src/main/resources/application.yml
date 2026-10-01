@@ -36,6 +36,19 @@ object-storage:
   secret-key: ${S3_SECRET_KEY:pics2text_dev_secret}
   bucket: ${S3_BUCKET:pics2text}
 
+print-render:
+  temp-root: ${PRINT_RENDER_TEMP_ROOT:${java.io.tmpdir}/pics2text-render}
+  python-executable: ${PRINT_RENDER_PYTHON:/usr/bin/python3}
+  renderer-script: ${PRINT_RENDER_SCRIPT:mosaic-render-worker/src/main/python/render_print.py}
+  srgb-profile: ${PRINT_RENDER_SRGB_PROFILE:/usr/share/color/icc/colord/sRGB.icc}
+  max-source-bytes: ${PRINT_RENDER_MAX_SOURCE_BYTES:1073741824}
+  max-output-bytes: ${PRINT_RENDER_MAX_OUTPUT_BYTES:1099511627776}
+  native-memory-bytes: ${PRINT_RENDER_NATIVE_MEMORY_BYTES:536870912}
+  max-open-files: ${PRINT_RENDER_MAX_OPEN_FILES:256}
+  timeout: ${PRINT_RENDER_TIMEOUT:6h}
+  stale-temp-age: ${PRINT_RENDER_STALE_TEMP_AGE:24h}
+  cleanup-interval: ${PRINT_RENDER_CLEANUP_INTERVAL:1h}
+
 mybatis-plus:
   type-handlers-package: com.pics2text.job.infrastructure.persistence
   configuration:

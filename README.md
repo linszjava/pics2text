@@ -20,8 +20,8 @@ P00 工程基础至 P08 载体表面与三维预览已经完成，下一阶段�
 - Redis
 - RabbitMQ
 - S3 兼容对象存储（开发环境使用 SeaweedFS）
-- OpenCV（照片分析）+ libvips（后续超大图渲染）
-- React + TypeScript + PixiJS + Three.js
+- OpenCV（照片分析）+ libvips/pyvips（分块 BigTIFF 超大图渲染）
+- React 19 + TypeScript + Ant Design 6 + PixiJS + Three.js
 
 ## 工程模块
 
@@ -60,6 +60,7 @@ docker compose up -d
 make api
 make analysis-worker
 make render-worker
+make render-worker-docker
 make web-install
 make web-dev
 ```
@@ -104,6 +105,8 @@ Java 应用可通过环境变量覆盖默认连接信息，例如 `DB_URL`、`DB
 
 载体表面使用毫米作为唯一物理单位，圆柱模板可配置直径、轴向长度、接缝、安全边距、禁印区、舱段和关键结构。锁定布局映射后会生成不可变的物理坐标、UV 坐标和三维坐标清单；接缝、安全边距或禁印区冲突会阻止发布。发布会将已验证清单与最终不可变版本绑定，Three.js 三维预览和后续 P09 印刷渲染共享该坐标源。
 
+高清印刷渲染以发布版本和曲面坐标清单为不可变输入，Java Worker 负责权限、作业状态、瓦片空间索引、校验和与审批，受限 Python/pyvips 子进程负责按需裁切、ICC 转换、分块合成和 BigTIFF 输出。只有文件头、大小和 SHA-256 全部验证且输出清单上传完成后，成品才进入待审批状态；审批通过后才能获取私有下载 URL。推荐通过 `make render-worker-docker` 启动内置 libvips 与 sRGB ICC 的 Worker。
+
 ## 首次管理员初始化
 
 生产部署前必须将 `IDENTITY_BOOTSTRAP_TOKEN` 替换为随机高强度值。初始化接口通过数据库原子状态保证只能成功执行一次：
@@ -122,4 +125,5 @@ curl http://localhost:18080/api/v1/auth/me \
   -H 'Authorization: Bearer <tokenValue>'
 ```
 
-密码必须为 12 至 128 位，并同时包含大小写字母、数字和特殊字符。默认连续失败 5 次后，同一用户名与客户端地址组合将被限制 15 分钟。
+当前开发阶段密码允许 5 至 128 位简单字符串；上线前必须恢复复杂度要求。默认连续失败 5 次后，同一用户名与客户端地址组合将被限制 15 分钟。
+公开注册默认开启，新注册账号固定为普通 `USER` 角色；生产环境可设置 `IDENTITY_REGISTRATION_ENABLED=false` 关闭。

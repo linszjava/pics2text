@@ -10,7 +10,9 @@
     "typecheck": "tsc -b --pretty false"
   },
   "dependencies": {
+    "@ant-design/icons": "^6.3.4",
     "@types/three": "^0.186.0",
+    "antd": "^6.6.5",
     "pixi.js": "8.21.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",

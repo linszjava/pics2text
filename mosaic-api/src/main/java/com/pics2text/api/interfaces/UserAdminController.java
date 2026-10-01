@@ -62,7 +62,7 @@ public class UserAdminController {
 
     public record CreateUserRequest(
             @NotBlank @Size(min = 3, max = 64) String username,
-            @NotBlank @Size(min = 12, max = 128) String password,
+            @NotBlank @Size(min = 5, max = 128) String password,
             @NotBlank @Size(max = 100) String displayName,
             @NotNull GlobalRole globalRole) {
     }

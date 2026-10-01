@@ -7,7 +7,8 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 
 @SpringBootApplication(scanBasePackages = "com.pics2text")
 @EnableScheduling
-@MapperScan({"com.pics2text.job.infrastructure.persistence", "com.pics2text.layout.infrastructure.persistence"})
+@MapperScan({"com.pics2text.job.infrastructure.persistence", "com.pics2text.layout.infrastructure.persistence",
+        "com.pics2text.rendering.infrastructure.persistence"})
 public class RenderWorkerApplication {
 
     public static void main(String[] args) {
