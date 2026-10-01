@@ -1,10 +1,22 @@
-.PHONY: verify package infra-up infra-down infra-status api analysis-worker render-worker
+.PHONY: verify package web-install web-test web-build web-dev infra-up infra-down infra-status api analysis-worker render-worker
 
 verify:
 	./mvnw verify
 
 package:
 	./mvnw clean package
+
+web-install:
+	cd mosaic-web && npm ci
+
+web-test:
+	cd mosaic-web && npm test
+
+web-build:
+	cd mosaic-web && npm run build
+
+web-dev:
+	cd mosaic-web && npm run dev
 
 infra-up:
 	docker compose up -d

@@ -10,6 +10,9 @@ target/
 node_modules/
 dist/
 .vite/
+*.tsbuildinfo
+mosaic-web/vite.config.js
+mosaic-web/vite.config.d.ts
 
 # IDE
 .idea/

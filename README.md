@@ -2,7 +2,7 @@
 
 将大量照片自动排版为指定文字，并支持曲面载体预览及超大印刷文件输出的平台。
 
-P00 工程基础、P01 身份认证与项目权限、P02 项目与照片上传、P03 异步任务与可靠消息、P04 照片分析与审核、P05 文字蒙版与网格生成、P06 照片评分与自动布局已经完成，下一阶段为 P07 布局版本与人工编辑。代码采用模块化单体架构，计算密集型任务通过独立 Worker 进程运行；在业务边界和容量要求尚未稳定前不拆分微服务。
+P00 工程基础至 P07 布局版本与人工编辑已经完成，下一阶段为 P08 载体表面与三维预览。代码采用模块化单体架构，计算密集型任务通过独立 Worker 进程运行；在业务边界和容量要求尚未稳定前不拆分微服务。
 
 ## 项目文档
 
@@ -38,12 +38,13 @@ P00 工程基础、P01 身份认证与项目权限、P02 项目与照片上传�
 | `mosaic-api` | HTTP API、认证入口和数据库迁移 |
 | `mosaic-analysis-worker` | 照片分析与布局计算进程 |
 | `mosaic-render-worker` | 高清渲染进程 |
+| `mosaic-web` | React + TypeScript + PixiJS 布局编辑器 |
 
 每个业务模块后续在内部按 `domain`、`application`、`infrastructure`、`interfaces` 分层。领域层不得依赖基础设施层或接口层，该约束由 ArchUnit 测试持续校验。
 
 ## 本地开发
 
-前置要求：JDK 21、Docker Desktop 或兼容的 Docker Compose 环境。项目内置 Maven Wrapper，会自动使用 Maven 3.9.16。
+前置要求：JDK 21、Node.js 22、Docker Desktop 或兼容的 Docker Compose 环境。项目内置 Maven Wrapper，会自动使用 Maven 3.9.16。
 
 ```bash
 cp .env.example .env
@@ -59,6 +60,8 @@ docker compose up -d
 make api
 make analysis-worker
 make render-worker
+make web-install
+make web-dev
 ```
 
 默认服务地址：
@@ -68,6 +71,7 @@ make render-worker
 | API 健康检查 | `http://localhost:18080/actuator/health` |
 | Analysis Worker 健康检查 | `http://localhost:18081/actuator/health` |
 | Render Worker 健康检查 | `http://localhost:18082/actuator/health` |
+| 布局编辑器 | `http://localhost:15173/?projectId=<项目UUID>&layoutId=<布局UUID>` |
 | PostgreSQL | `localhost:15432` |
 | Redis | `localhost:16379` |
 | RabbitMQ 管理台 | `http://localhost:15672` |
@@ -78,6 +82,8 @@ make render-worker
 ```bash
 make infra-status
 make verify
+make web-test
+make web-build
 make infra-down
 ```
 
@@ -92,6 +98,8 @@ Java 应用可通过环境变量覆盖默认连接信息，例如 `DB_URL`、`DB
 上传验真通过后会自动创建 `PHOTO_ANALYSIS` 作业。Analysis Worker 对源文件执行字节数和像素数双重限制、EXIF 方向纠正与元数据清理，生成规范化 JPEG 及 256/1024/2048 三档 WebP；同时计算拉普拉斯清晰度、亮度、对比度、Lab 均值、dHash/pHash、主体或人脸保护框和推荐裁剪。可通过 `PHOTO_ANALYSIS_MAX_SOURCE_BYTES`、`PHOTO_ANALYSIS_MAX_PIXELS`、质量阈值及 `PHOTO_FACE_CASCADE_PATH` 调整分析策略；未配置人脸级联模型时使用主体边缘区域兜底。分析结果和人工审核接口见 [OpenAPI 说明](docs/api/openapi.yaml)。
 
 文字蒙版通过 `TEXT_MASK_GENERATION` 作业异步生成，支持横排、竖排、100—900 字重、字距/行距、规则网格和错位网格。生成结果包括灰度 PNG、带槽位框的调试 PNG、内容边界、估算笔画宽度、覆盖率、可读性警告和持久化网格槽位。仓库内置 Noto Sans SC 可变字体，并同时保存 OFL 许可证、来源、版本标识和 SHA-256；蒙版配置摘要包含算法版本与字体校验值，避免字体升级造成静默漂移。
+
+自动布局可导入为可编辑草稿。每批交换、替换或裁剪命令都记录操作者、时间、前后值，并生成完整的不可变 `LayoutVersion`；客户端批次 UUID 支持失败重放，数据库乐观锁防止并发静默覆盖。布局必须先锁定才能发布，锁定或已发布布局不可修改。PixiJS 编辑器按视口查询槽位并分批加载私有缩略图，支持缩放、平移、按槽位或照片定位、本地草稿恢复和自动保存；Render Worker 可根据版本生成最长边不超过 2048 像素的低分辨率颜色预览。
 
 ## 首次管理员初始化
 

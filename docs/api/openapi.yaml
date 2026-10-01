@@ -525,6 +525,143 @@ paths:
       responses:
         '200': { description: 布局分配结果, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/AutoLayoutAssignment' } } } } }
         '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/projects/{projectId}/editable-layouts:
+    post:
+      tags: [Layout]
+      summary: 从已完成的自动布局创建可编辑布局及初始不可变版本
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/ProjectId' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CreateEditableLayoutRequest' } } } }
+      responses:
+        '201': { description: 可编辑布局, content: { application/json: { schema: { $ref: '#/components/schemas/EditableLayout' } } } }
+        '409': { $ref: '#/components/responses/Conflict' }
+    get:
+      tags: [Layout]
+      summary: 分页查询可编辑布局
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/ProjectId' }
+        - { in: query, name: page, schema: { type: integer, minimum: 0, default: 0 } }
+        - { in: query, name: size, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        '200': { description: 可编辑布局列表, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/EditableLayout' } } } } }
+  /api/v1/projects/{projectId}/editable-layouts/{editableLayoutId}:
+    get:
+      tags: [Layout]
+      summary: 查询可编辑布局
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/ProjectId' }, { $ref: '#/components/parameters/EditableLayoutId' }]
+      responses:
+        '200': { description: 可编辑布局, content: { application/json: { schema: { $ref: '#/components/schemas/EditableLayout' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/projects/{projectId}/editable-layouts/{editableLayoutId}/assignments:
+    get:
+      tags: [Layout]
+      summary: 按视口、槽位或照片查询当前草稿分配
+      description: 画布使用 minX/minY/maxX/maxY 做视口虚拟化；最多返回 5000 项。
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/ProjectId' }
+        - { $ref: '#/components/parameters/EditableLayoutId' }
+        - { in: query, name: photoId, schema: { type: string, format: uuid } }
+        - { in: query, name: slotIndex, schema: { type: integer, minimum: 0 } }
+        - { in: query, name: minX, schema: { type: integer } }
+        - { in: query, name: minY, schema: { type: integer } }
+        - { in: query, name: maxX, schema: { type: integer } }
+        - { in: query, name: maxY, schema: { type: integer } }
+        - { in: query, name: limit, schema: { type: integer, minimum: 1, maximum: 5000, default: 2000 } }
+      responses:
+        '200': { description: 当前草稿分配, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/EditableAssignment' } } } } }
+  /api/v1/projects/{projectId}/editable-layouts/{editableLayoutId}/photo-preview-urls:
+    post:
+      tags: [Layout]
+      summary: 批量获取画布缩略图的私有预签名 URL
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/ProjectId' }, { $ref: '#/components/parameters/EditableLayoutId' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/PhotoPreviewUrlRequest' } } } }
+      responses:
+        '200': { description: 最多 200 个缩略图 URL, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/PhotoPreviewUrl' } } } } }
+  /api/v1/projects/{projectId}/editable-layouts/{editableLayoutId}/edits:
+    post:
+      tags: [Layout]
+      summary: 批量执行交换、替换和裁剪并生成不可变快照
+      description: expectedLockVersion 提供乐观锁；clientBatchId 提供幂等重放。发生并发冲突时绝不静默覆盖。
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/ProjectId' }, { $ref: '#/components/parameters/EditableLayoutId' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/LayoutEditBatchRequest' } } } }
+      responses:
+        '200': { description: 保存结果, content: { application/json: { schema: { $ref: '#/components/schemas/LayoutEditResponse' } } } }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/projects/{projectId}/editable-layouts/{editableLayoutId}/restore:
+    post:
+      tags: [Layout]
+      summary: 从历史快照恢复并生成新的不可变版本
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/ProjectId' }, { $ref: '#/components/parameters/EditableLayoutId' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/LayoutRestoreRequest' } } } }
+      responses:
+        '200': { description: 恢复结果, content: { application/json: { schema: { $ref: '#/components/schemas/LayoutEditResponse' } } } }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/projects/{projectId}/editable-layouts/{editableLayoutId}/lock:
+    post:
+      tags: [Layout]
+      summary: 锁定布局并生成锁定版本
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/ProjectId' }, { $ref: '#/components/parameters/EditableLayoutId' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/LayoutTransitionRequest' } } } }
+      responses: { '200': { description: 锁定结果, content: { application/json: { schema: { $ref: '#/components/schemas/LayoutTransitionResponse' } } } }, '409': { $ref: '#/components/responses/Conflict' } }
+  /api/v1/projects/{projectId}/editable-layouts/{editableLayoutId}/unlock:
+    post:
+      tags: [Layout]
+      summary: 解锁布局
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/ProjectId' }, { $ref: '#/components/parameters/EditableLayoutId' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/LayoutTransitionRequest' } } } }
+      responses: { '200': { description: 解锁后的布局, content: { application/json: { schema: { $ref: '#/components/schemas/EditableLayout' } } } }, '409': { $ref: '#/components/responses/Conflict' } }
+  /api/v1/projects/{projectId}/editable-layouts/{editableLayoutId}/publish:
+    post:
+      tags: [Layout]
+      summary: 发布已锁定布局并固化发布版本
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/ProjectId' }, { $ref: '#/components/parameters/EditableLayoutId' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/LayoutTransitionRequest' } } } }
+      responses: { '200': { description: 发布结果, content: { application/json: { schema: { $ref: '#/components/schemas/LayoutTransitionResponse' } } } }, '409': { $ref: '#/components/responses/Conflict' } }
+  /api/v1/projects/{projectId}/editable-layouts/{editableLayoutId}/versions:
+    get:
+      tags: [Layout]
+      summary: 分页查询不可变版本历史
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/ProjectId' }, { $ref: '#/components/parameters/EditableLayoutId' }, { in: query, name: page, schema: { type: integer, minimum: 0, default: 0 } }, { in: query, name: size, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }]
+      responses: { '200': { description: 版本历史, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/LayoutVersion' } } } } } }
+  /api/v1/projects/{projectId}/editable-layouts/{editableLayoutId}/operations:
+    get:
+      tags: [Layout]
+      summary: 分页查询追加式编辑操作审计历史
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/ProjectId' }, { $ref: '#/components/parameters/EditableLayoutId' }, { in: query, name: page, schema: { type: integer, minimum: 0, default: 0 } }, { in: query, name: size, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }]
+      responses: { '200': { description: 操作历史, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/LayoutEditOperation' } } } } } }
+  /api/v1/projects/{projectId}/editable-layouts/{editableLayoutId}/previews:
+    post:
+      tags: [Layout]
+      summary: 创建指定版本的低分辨率预览任务
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/ProjectId' }, { $ref: '#/components/parameters/EditableLayoutId' }]
+      requestBody: { required: false, content: { application/json: { schema: { type: object, properties: { versionId: { type: string, format: uuid } } } } } }
+      responses: { '201': { description: 预览和任务, content: { application/json: { schema: { $ref: '#/components/schemas/LayoutPreviewCreated' } } } } }
+  /api/v1/projects/{projectId}/editable-layouts/{editableLayoutId}/previews/{previewId}:
+    get:
+      tags: [Layout]
+      summary: 查询低分辨率预览状态
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/ProjectId' }, { $ref: '#/components/parameters/EditableLayoutId' }, { $ref: '#/components/parameters/PreviewId' }]
+      responses: { '200': { description: 预览状态, content: { application/json: { schema: { $ref: '#/components/schemas/LayoutPreview' } } } } }
+  /api/v1/projects/{projectId}/editable-layouts/{editableLayoutId}/previews/{previewId}/download-url:
+    post:
+      tags: [Layout]
+      summary: 获取已完成预览的私有下载 URL
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/ProjectId' }, { $ref: '#/components/parameters/EditableLayoutId' }, { $ref: '#/components/parameters/PreviewId' }]
+      responses: { '200': { description: 预签名下载请求, content: { application/json: { schema: { $ref: '#/components/schemas/PresignedRequest' } } } }, '409': { $ref: '#/components/responses/Conflict' } }
   /api/v1/projects/{projectId}/jobs:
     get:
       tags: [Jobs]
@@ -638,6 +775,16 @@ components:
     LayoutId:
       in: path
       name: layoutId
+      required: true
+      schema: { type: string, format: uuid }
+    EditableLayoutId:
+      in: path
+      name: editableLayoutId
+      required: true
+      schema: { type: string, format: uuid }
+    PreviewId:
+      in: path
+      name: previewId
       required: true
       schema: { type: string, format: uuid }
   responses:
@@ -1066,6 +1213,170 @@ components:
         cropY: { type: number, minimum: 0, maximum: 1 }
         cropWidth: { type: number, exclusiveMinimum: 0, maximum: 1 }
         cropHeight: { type: number, exclusiveMinimum: 0, maximum: 1 }
+    CreateEditableLayoutRequest:
+      type: object
+      required: [sourceAutoLayoutId, name]
+      properties:
+        sourceAutoLayoutId: { type: string, format: uuid }
+        name: { type: string, minLength: 1, maxLength: 120 }
+    EditableLayout:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        projectId: { type: string, format: uuid }
+        sourceAutoLayoutId: { type: string, format: uuid }
+        maskId: { type: string, format: uuid }
+        name: { type: string }
+        state: { type: string, enum: [DRAFT, LOCKED, PUBLISHED] }
+        canvasWidth: { type: integer, minimum: 1 }
+        canvasHeight: { type: integer, minimum: 1 }
+        allowPhotoReuse: { type: boolean }
+        maxPhotoReuse: { type: integer, minimum: 1 }
+        currentRevision: { type: integer, format: int64, minimum: 0 }
+        lockVersion: { type: integer, format: int64, minimum: 0 }
+        currentVersionNumber: { type: integer, minimum: 1 }
+        currentVersionId: { type: string, format: uuid }
+        publishedVersionId: { type: [string, 'null'], format: uuid }
+        lockedBy: { type: [string, 'null'], format: uuid }
+        lockedAt: { type: [string, 'null'], format: date-time }
+        publishedBy: { type: [string, 'null'], format: uuid }
+        publishedAt: { type: [string, 'null'], format: date-time }
+        createdBy: { type: string, format: uuid }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    EditableAssignment:
+      type: object
+      properties:
+        ownerId: { type: string, format: uuid }
+        slotIndex: { type: integer, minimum: 0 }
+        photoId: { type: string, format: uuid }
+        x: { type: integer }
+        y: { type: integer }
+        width: { type: integer, minimum: 1 }
+        height: { type: integer, minimum: 1 }
+        cropX: { type: number, minimum: 0, maximum: 1 }
+        cropY: { type: number, minimum: 0, maximum: 1 }
+        cropWidth: { type: number, exclusiveMinimum: 0, maximum: 1 }
+        cropHeight: { type: number, exclusiveMinimum: 0, maximum: 1 }
+    PhotoPreviewUrlRequest:
+      type: object
+      required: [photoIds]
+      properties:
+        photoIds: { type: array, minItems: 1, maxItems: 200, uniqueItems: true, items: { type: string, format: uuid } }
+    PhotoPreviewUrl:
+      type: object
+      properties:
+        photoId: { type: string, format: uuid }
+        url: { type: string, format: uri }
+        headers: { type: object, additionalProperties: { type: array, items: { type: string } } }
+    LayoutEditCommand:
+      oneOf:
+        - type: object
+          required: [type, slotIndex, secondarySlotIndex]
+          properties:
+            type: { const: SWAP }
+            slotIndex: { type: integer, minimum: 0 }
+            secondarySlotIndex: { type: integer, minimum: 0 }
+        - type: object
+          required: [type, slotIndex, photoId]
+          properties:
+            type: { const: REPLACE }
+            slotIndex: { type: integer, minimum: 0 }
+            photoId: { type: string, format: uuid }
+        - type: object
+          required: [type, slotIndex, cropX, cropY, cropWidth, cropHeight]
+          properties:
+            type: { const: CROP }
+            slotIndex: { type: integer, minimum: 0 }
+            cropX: { type: number, minimum: 0, maximum: 1 }
+            cropY: { type: number, minimum: 0, maximum: 1 }
+            cropWidth: { type: number, exclusiveMinimum: 0, maximum: 1 }
+            cropHeight: { type: number, exclusiveMinimum: 0, maximum: 1 }
+    LayoutEditBatchRequest:
+      type: object
+      required: [expectedLockVersion, clientBatchId, commands]
+      properties:
+        expectedLockVersion: { type: integer, format: int64, minimum: 0 }
+        clientBatchId: { type: string, format: uuid }
+        note: { type: string, maxLength: 500 }
+        commands: { type: array, minItems: 1, maxItems: 100, items: { $ref: '#/components/schemas/LayoutEditCommand' } }
+    LayoutRestoreRequest:
+      type: object
+      required: [versionId, expectedLockVersion, clientBatchId]
+      properties:
+        versionId: { type: string, format: uuid }
+        expectedLockVersion: { type: integer, format: int64, minimum: 0 }
+        clientBatchId: { type: string, format: uuid }
+        note: { type: string, maxLength: 500 }
+    LayoutTransitionRequest:
+      type: object
+      required: [expectedLockVersion]
+      properties:
+        expectedLockVersion: { type: integer, format: int64, minimum: 0 }
+        note: { type: string, maxLength: 500 }
+    LayoutVersion:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        layoutId: { type: string, format: uuid }
+        versionNumber: { type: integer, minimum: 1 }
+        parentVersionId: { type: [string, 'null'], format: uuid }
+        reason: { type: string, enum: [IMPORT, AUTO_SAVE, RESTORE, LOCK, PUBLISH] }
+        clientBatchId: { type: [string, 'null'], format: uuid }
+        sourceRevision: { type: integer, format: int64, minimum: 0 }
+        contentHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+        assignmentCount: { type: integer, minimum: 0 }
+        note: { type: [string, 'null'] }
+        createdBy: { type: string, format: uuid }
+        createdAt: { type: string, format: date-time }
+    LayoutEditOperation:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        layoutId: { type: string, format: uuid }
+        revision: { type: integer, format: int64, minimum: 1 }
+        clientBatchId: { type: string, format: uuid }
+        commandIndex: { type: integer, minimum: 0 }
+        commandType: { type: string, enum: [SWAP, REPLACE, CROP, RESTORE] }
+        primarySlotIndex: { type: [integer, 'null'] }
+        secondarySlotIndex: { type: [integer, 'null'] }
+        beforeJson: { type: string }
+        afterJson: { type: string }
+        actorId: { type: string, format: uuid }
+        createdAt: { type: string, format: date-time }
+    LayoutEditResponse:
+      type: object
+      properties:
+        layout: { $ref: '#/components/schemas/EditableLayout' }
+        version: { $ref: '#/components/schemas/LayoutVersion' }
+        idempotentReplay: { type: boolean }
+    LayoutTransitionResponse:
+      type: object
+      properties:
+        layout: { $ref: '#/components/schemas/EditableLayout' }
+        version: { $ref: '#/components/schemas/LayoutVersion' }
+    LayoutPreview:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        layoutId: { type: string, format: uuid }
+        versionId: { type: string, format: uuid }
+        status: { type: string, enum: [PENDING, PROCESSING, READY, FAILED] }
+        width: { type: [integer, 'null'] }
+        height: { type: [integer, 'null'] }
+        assignmentCount: { type: integer, minimum: 0 }
+        errorCode: { type: [string, 'null'] }
+        errorMessage: { type: [string, 'null'] }
+        createdBy: { type: string, format: uuid }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        completedAt: { type: [string, 'null'], format: date-time }
+    LayoutPreviewCreated:
+      type: object
+      properties:
+        preview: { $ref: '#/components/schemas/LayoutPreview' }
+        jobId: { type: [string, 'null'], format: uuid, description: 已存在可复用预览时为空 }
+        existing: { type: boolean }
     AuditLog:
       type: object
       properties:
@@ -1094,7 +1405,7 @@ components:
         projectId: { type: string, format: uuid }
         resourceType: { type: [string, 'null'] }
         resourceId: { type: [string, 'null'], format: uuid }
-        type: { type: string, enum: [PHOTO_ANALYSIS, TEXT_MASK_GENERATION, LAYOUT_GENERATION, PRINT_RENDER, INFRASTRUCTURE_PROBE] }
+        type: { type: string, enum: [PHOTO_ANALYSIS, TEXT_MASK_GENERATION, LAYOUT_GENERATION, LAYOUT_PREVIEW, PRINT_RENDER, INFRASTRUCTURE_PROBE] }
         status: { $ref: '#/components/schemas/JobStatus' }
         progress: { type: integer, minimum: 0, maximum: 100 }
         currentAttempt: { type: integer, minimum: 0 }

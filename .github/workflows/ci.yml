@@ -22,3 +22,23 @@ jobs:
           cache: maven
       - name: Verify
         run: ./mvnw --batch-mode --no-transfer-progress verify
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mosaic-web
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: mosaic-web/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Test
+        run: npm test
+      - name: Build
+        run: npm run build

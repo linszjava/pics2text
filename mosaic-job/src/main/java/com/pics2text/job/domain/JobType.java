@@ -4,6 +4,7 @@ public enum JobType {
     PHOTO_ANALYSIS("analysis"),
     TEXT_MASK_GENERATION("analysis"),
     LAYOUT_GENERATION("analysis"),
+    LAYOUT_PREVIEW("render"),
     PRINT_RENDER("render"),
     INFRASTRUCTURE_PROBE("analysis");
 
