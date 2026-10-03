@@ -8,14 +8,12 @@ servers:
     description: 本地开发环境
 tags:
   - name: Authentication
-  - name: Users
   - name: Projects
   - name: Photos
   - name: Layout
   - name: Surface
   - name: Rendering
   - name: Jobs
-  - name: Audit
 paths:
   /api/v1/auth/bootstrap:
     post:
@@ -111,71 +109,6 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/User' }
         '401': { $ref: '#/components/responses/Unauthorized' }
-  /api/v1/admin/users:
-    get:
-      tags: [Users]
-      summary: 查询用户
-      security: [{ bearerAuth: [] }]
-      responses:
-        '200':
-          description: 用户列表，最多返回 200 条
-          content:
-            application/json:
-              schema:
-                type: array
-                items: { $ref: '#/components/schemas/User' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-    post:
-      tags: [Users]
-      summary: 创建用户
-      security: [{ bearerAuth: [] }]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/CreateUserRequest' }
-      responses:
-        '201':
-          description: 用户创建成功
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/User' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/admin/users/{userId}/status:
-    patch:
-      tags: [Users]
-      summary: 启用或停用用户
-      security: [{ bearerAuth: [] }]
-      parameters:
-        - $ref: '#/components/parameters/UserId'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [status]
-              properties:
-                status: { $ref: '#/components/schemas/UserStatus' }
-      responses:
-        '200':
-          description: 状态更新成功
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/User' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/admin/users/{userId}/kick:
-    post:
-      tags: [Users]
-      summary: 强制用户全部会话下线
-      security: [{ bearerAuth: [] }]
-      parameters:
-        - $ref: '#/components/parameters/UserId'
-      responses:
-        '204': { description: 已踢出 }
-        '403': { $ref: '#/components/responses/Forbidden' }
   /api/v1/projects:
     get:
       tags: [Projects]
@@ -251,58 +184,6 @@ paths:
       parameters: [{ $ref: '#/components/parameters/ProjectId' }]
       responses:
         '200': { description: 已恢复, content: { application/json: { schema: { $ref: '#/components/schemas/Project' } } } }
-  /api/v1/projects/{projectId}/members:
-    get:
-      tags: [Projects]
-      summary: 查询项目成员
-      security: [{ bearerAuth: [] }]
-      parameters:
-        - $ref: '#/components/parameters/ProjectId'
-      responses:
-        '200':
-          description: 项目成员列表
-          content:
-            application/json:
-              schema:
-                type: array
-                items: { $ref: '#/components/schemas/ProjectMember' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-  /api/v1/projects/{projectId}/members/{userId}:
-    put:
-      tags: [Projects]
-      summary: 新增成员或修改项目角色
-      security: [{ bearerAuth: [] }]
-      parameters:
-        - $ref: '#/components/parameters/ProjectId'
-        - $ref: '#/components/parameters/UserId'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [role]
-              properties:
-                role: { $ref: '#/components/schemas/ProjectRole' }
-      responses:
-        '200':
-          description: 成员保存成功
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ProjectMember' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '409': { $ref: '#/components/responses/Conflict' }
-    delete:
-      tags: [Projects]
-      summary: 移除项目成员
-      security: [{ bearerAuth: [] }]
-      parameters:
-        - $ref: '#/components/parameters/ProjectId'
-        - $ref: '#/components/parameters/UserId'
-      responses:
-        '204': { description: 已移除 }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '409': { $ref: '#/components/responses/Conflict' }
   /api/v1/projects/{projectId}/photos/uploads:
     post:
       tags: [Photos]
@@ -380,9 +261,25 @@ paths:
       parameters: [{ $ref: '#/components/parameters/ProjectId' }, { $ref: '#/components/parameters/PhotoId' }]
       responses:
         '200': { description: 照片, content: { application/json: { schema: { $ref: '#/components/schemas/Photo' } } } }
+    patch:
+      tags: [Photos]
+      summary: 重命名照片（仅项目创建者）
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/ProjectId' }, { $ref: '#/components/parameters/PhotoId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [filename]
+              properties:
+                filename: { type: string, minLength: 1, maxLength: 255 }
+      responses:
+        '200': { description: 更新后的照片, content: { application/json: { schema: { $ref: '#/components/schemas/Photo' } } } }
     delete:
       tags: [Photos]
-      summary: 管理员删除照片及对象
+      summary: 项目创建者删除照片及对象
       security: [{ bearerAuth: [] }]
       parameters: [{ $ref: '#/components/parameters/ProjectId' }, { $ref: '#/components/parameters/PhotoId' }]
       responses: { '204': { description: 已删除 }, '403': { $ref: '#/components/responses/Forbidden' } }
@@ -395,6 +292,16 @@ paths:
       responses:
         '200': { description: 预签名下载请求, content: { application/json: { schema: { $ref: '#/components/schemas/PresignedRequest' } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/projects/{projectId}/photos/{photoId}/preview-urls:
+    post:
+      tags: [Photos]
+      summary: 获取私有缩略图和审核预览 URL
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/ProjectId' }, { $ref: '#/components/parameters/PhotoId' }]
+      responses:
+        '200': { description: 缩略图和预览图预签名请求, content: { application/json: { schema: { $ref: '#/components/schemas/PhotoPreview' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
   /api/v1/projects/{projectId}/photos/{photoId}/analysis:
     get:
       tags: [Photos]
@@ -404,22 +311,6 @@ paths:
       responses:
         '200': { description: 分析结果, content: { application/json: { schema: { $ref: '#/components/schemas/PhotoAnalysisResult' } } } }
         '404': { $ref: '#/components/responses/NotFound' }
-  /api/v1/projects/{projectId}/photos/{photoId}/review:
-    post:
-      tags: [Photos]
-      summary: 人工审核照片
-      description: 需要项目照片审核权限，且只能审核已完成自动分析的可用照片。
-      security: [{ bearerAuth: [] }]
-      parameters: [{ $ref: '#/components/parameters/ProjectId' }, { $ref: '#/components/parameters/PhotoId' }]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/ManualReviewRequest' }
-      responses:
-        '200': { description: 审核后的照片, content: { application/json: { schema: { $ref: '#/components/schemas/Photo' } } } }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '409': { $ref: '#/components/responses/Conflict' }
   /api/v1/projects/{projectId}/photos/{photoId}/withdraw:
     post:
       tags: [Photos]
@@ -574,6 +465,23 @@ paths:
       responses:
         '200': { description: 可编辑布局, content: { application/json: { schema: { $ref: '#/components/schemas/EditableLayout' } } } }
         '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Layout]
+      summary: 重命名可编辑布局
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/ProjectId' }, { $ref: '#/components/parameters/EditableLayoutId' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/RenameEditableLayoutRequest' } } } }
+      responses:
+        '200': { description: 更新后的可编辑布局, content: { application/json: { schema: { $ref: '#/components/schemas/EditableLayout' } } } }
+        '409': { $ref: '#/components/responses/Conflict' }
+    delete:
+      tags: [Layout]
+      summary: 删除未发布且未绑定曲面的可编辑布局
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/ProjectId' }, { $ref: '#/components/parameters/EditableLayoutId' }]
+      responses:
+        '204': { description: 删除成功 }
+        '409': { $ref: '#/components/responses/Conflict' }
   /api/v1/projects/{projectId}/editable-layouts/{editableLayoutId}/assignments:
     get:
       tags: [Layout]
@@ -592,6 +500,15 @@ paths:
         - { in: query, name: limit, schema: { type: integer, minimum: 1, maximum: 5000, default: 2000 } }
       responses:
         '200': { description: 当前草稿分配, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/EditableAssignment' } } } } }
+  /api/v1/projects/{projectId}/editable-layouts/{editableLayoutId}/activate:
+    put:
+      tags: [Layout]
+      summary: 将已锁定或已发布布局设为项目当前使用布局
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/ProjectId' }, { $ref: '#/components/parameters/EditableLayoutId' }]
+      responses:
+        '200': { description: 当前使用布局, content: { application/json: { schema: { $ref: '#/components/schemas/EditableLayout' } } } }
+        '409': { $ref: '#/components/responses/Conflict' }
   /api/v1/projects/{projectId}/editable-layouts/{editableLayoutId}/photo-preview-urls:
     post:
       tags: [Layout]
@@ -862,20 +779,6 @@ paths:
             schema: { $ref: '#/components/schemas/ProbeJobRequest' }
       responses:
         '201': { description: 探针已创建, content: { application/json: { schema: { $ref: '#/components/schemas/Job' } } } }
-  /api/v1/admin/audit-logs:
-    get:
-      tags: [Audit]
-      summary: 查询最近审计记录
-      security: [{ bearerAuth: [] }]
-      responses:
-        '200':
-          description: 最近 200 条审计记录，不返回 IP 和内部详情
-          content:
-            application/json:
-              schema:
-                type: array
-                items: { $ref: '#/components/schemas/AuditLog' }
-        '403': { $ref: '#/components/responses/Forbidden' }
 components:
   securitySchemes:
     bearerAuth:
@@ -969,14 +872,6 @@ components:
         username: { type: string, minLength: 3, maxLength: 64 }
         password: { type: string, format: password, minLength: 5, maxLength: 128 }
         displayName: { type: string, minLength: 1, maxLength: 100 }
-    CreateUserRequest:
-      type: object
-      required: [username, password, displayName, globalRole]
-      properties:
-        username: { type: string, minLength: 3, maxLength: 64 }
-        password: { type: string, format: password, minLength: 5, maxLength: 128 }
-        displayName: { type: string, minLength: 1, maxLength: 100 }
-        globalRole: { $ref: '#/components/schemas/GlobalRole' }
     Session:
       type: object
       required: [tokenName, tokenValue, tokenTimeout, activeTimeout, user]
@@ -1003,9 +898,6 @@ components:
     UserStatus:
       type: string
       enum: [ACTIVE, DISABLED]
-    ProjectRole:
-      type: string
-      enum: [PROJECT_ADMIN, REVIEWER, DESIGNER, VIEWER]
     Project:
       type: object
       properties:
@@ -1016,6 +908,7 @@ components:
         configurationJson: { type: string, description: JSON 格式的项目业务配置 }
         retentionDays: { type: integer, minimum: 1, maximum: 3650 }
         maxPhotoBytes: { type: integer, format: int64 }
+        activeLayoutId: { type: [string, 'null'], format: uuid }
         archivedAt: { type: [string, 'null'], format: date-time }
         createdBy: { type: string, format: uuid }
         createdAt: { type: string, format: date-time }
@@ -1056,6 +949,12 @@ components:
         headers:
           type: object
           additionalProperties: { type: array, items: { type: string } }
+    PhotoPreview:
+      type: object
+      required: [thumbnail, preview]
+      properties:
+        thumbnail: { $ref: '#/components/schemas/PresignedRequest' }
+        preview: { $ref: '#/components/schemas/PresignedRequest' }
     InitiatedUpload:
       type: object
       properties:
@@ -1095,7 +994,6 @@ components:
         height: { type: [integer, 'null'] }
         sha256: { type: string }
         authorizationStatus: { type: string, enum: [PENDING, GRANTED, REVOKED] }
-        reviewStatus: { type: string, enum: [PENDING, APPROVED, REJECTED] }
         status: { $ref: '#/components/schemas/PhotoStatus' }
         analysisStatus: { anyOf: [{ $ref: '#/components/schemas/AnalysisStatus' }, { type: 'null' }] }
         uploadMode: { type: string, enum: [SINGLE, MULTIPART] }
@@ -1104,19 +1002,10 @@ components:
         failureMessage: { type: [string, 'null'] }
         analysisErrorCode: { type: [string, 'null'] }
         analysisErrorMessage: { type: [string, 'null'] }
-        reviewedBy: { type: [string, 'null'], format: uuid }
-        reviewedAt: { type: [string, 'null'], format: date-time }
-        reviewNote: { type: [string, 'null'] }
         retentionUntil: { type: [string, 'null'], format: date-time }
         availableAt: { type: [string, 'null'], format: date-time }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
-    ManualReviewRequest:
-      type: object
-      required: [decision, note]
-      properties:
-        decision: { type: string, enum: [APPROVED, REJECTED] }
-        note: { type: string, minLength: 1, maxLength: 500 }
     PhotoAnalysisResult:
       type: object
       properties:
@@ -1164,12 +1053,6 @@ components:
         height: { type: integer, minimum: 1 }
         byteSize: { type: integer, format: int64, minimum: 1 }
         contentType: { type: string, enum: [image/webp] }
-        createdAt: { type: string, format: date-time }
-    ProjectMember:
-      type: object
-      properties:
-        user: { $ref: '#/components/schemas/User' }
-        role: { $ref: '#/components/schemas/ProjectRole' }
         createdAt: { type: string, format: date-time }
     FontAsset:
       type: object
@@ -1283,7 +1166,7 @@ components:
         maskId: { type: string, format: uuid }
         randomSeed: { type: integer, format: int64 }
         allowPhotoReuse: { type: boolean }
-        maxPhotoReuse: { type: integer, minimum: 1, maximum: 100 }
+        maxPhotoReuse: { type: integer, minimum: 1, maximum: 10000 }
         targetLabL: { type: number, minimum: 0, maximum: 255 }
         targetLabA: { type: number, minimum: 0, maximum: 255 }
         targetLabB: { type: number, minimum: 0, maximum: 255 }
@@ -1366,6 +1249,12 @@ components:
       properties:
         sourceAutoLayoutId: { type: string, format: uuid }
         name: { type: string, minLength: 1, maxLength: 120 }
+    RenameEditableLayoutRequest:
+      type: object
+      required: [name, expectedLockVersion]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        expectedLockVersion: { type: integer, minimum: 0 }
     EditableLayout:
       type: object
       properties:
@@ -1690,17 +1579,6 @@ components:
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
         completedAt: { type: [string, 'null'], format: date-time }
-    AuditLog:
-      type: object
-      properties:
-        id: { type: integer, format: int64 }
-        actorUserId: { type: [string, 'null'], format: uuid }
-        action: { type: string }
-        targetType: { type: string }
-        targetId: { type: [string, 'null'] }
-        success: { type: boolean }
-        requestId: { type: [string, 'null'] }
-        createdAt: { type: string, format: date-time }
     ProbeJobRequest:
       type: object
       required: [failUntilAttempt, durationMillis, maxAttempts]

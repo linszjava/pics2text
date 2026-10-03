@@ -25,6 +25,8 @@ spring:
     password: ${RABBITMQ_PASSWORD:pics2text_dev}
     publisher-confirm-type: correlated
     publisher-returns: true
+    template:
+      observation-enabled: true
   flyway:
     enabled: true
     validate-migration-naming: true
@@ -91,6 +93,20 @@ jobs:
     poll-interval: ${JOB_SSE_POLL_INTERVAL:1000}
 
 management:
+  otlp:
+    metrics:
+      export:
+        enabled: false
+  tracing:
+    sampling:
+      probability: ${TRACING_SAMPLING_PROBABILITY:1.0}
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          endpoint: ${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:http://localhost:4318/v1/traces}
+    resource-attributes:
+      deployment.environment: ${DEPLOYMENT_ENVIRONMENT:local}
   endpoints:
     web:
       exposure:

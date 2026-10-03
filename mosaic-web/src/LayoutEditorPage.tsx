@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AimOutlined, CompressOutlined, LogoutOutlined, ZoomInOutlined, ZoomOutOutlined } from '@ant-design/icons';
-import { Alert, Button, Input, InputNumber, Space, Tag, Typography } from 'antd';
+import { Alert, Button, Empty, Input, InputNumber, Modal, Space, Tag, Typography } from 'antd';
 import { LayoutApi, type ViewportQuery } from './api';
+import { OperationsApi, type PhotoSummary } from './operationsApi';
 import { authToken, logout } from './auth';
 import { DraftRecovery, type PendingDraft } from './draftRecovery';
 import { PixiLayoutCanvas, type CanvasHandle } from './PixiLayoutCanvas';
 import type { ApiFailure, Assignment, EditCommand, EditableLayout } from './types';
+import { statusLabel } from './uiLabels';
 
 const AUTOSAVE_DELAY_MS = 1_200;
 
@@ -15,6 +17,7 @@ export function LayoutEditorPage() {
   const layoutId = params.get('layoutId') ?? '';
   const token = authToken();
   const api = useMemo(() => new LayoutApi('', token), [token]);
+  const photoApi = useMemo(() => new OperationsApi(), []);
   const recovery = useMemo(() => new DraftRecovery(localStorage,
     `pics2text.layout-draft.${projectId}.${layoutId}`), [projectId, layoutId]);
   const canvasRef = useRef<CanvasHandle>(null);
@@ -23,6 +26,7 @@ export function LayoutEditorPage() {
   const replayDraftRef = useRef<PendingDraft | null>(null);
   const savingRef = useRef(false);
   const viewportSequence = useRef(0);
+  const lastViewport = useRef<ViewportQuery | null>(null);
   const urlCache = useRef(new Map<string, string>());
   const [layout, setLayoutState] = useState<EditableLayout | null>(null);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
@@ -32,7 +36,11 @@ export function LayoutEditorPage() {
   const [status, setStatus] = useState('正在加载布局…');
   const [error, setError] = useState('');
   const [locateValue, setLocateValue] = useState('');
-  const [replacePhotoId, setReplacePhotoId] = useState('');
+  const [libraryPhotos, setLibraryPhotos] = useState<PhotoSummary[]>([]);
+  const [newerLayout, setNewerLayout] = useState<EditableLayout | null>(null);
+  const [replaceOpen, setReplaceOpen] = useState(false);
+  const [photoSearch, setPhotoSearch] = useState('');
+  const [unlocking, setUnlocking] = useState(false);
   const [swapSlot, setSwapSlot] = useState('');
   const [crop, setCrop] = useState({ x: 0, y: 0, width: 1, height: 1 });
 
@@ -52,6 +60,7 @@ export function LayoutEditorPage() {
   }, [api, layoutId, projectId]);
 
   const loadViewport = useCallback(async (bounds: ViewportQuery) => {
+    lastViewport.current = bounds;
     const sequence = ++viewportSequence.current;
     if (bounds.maxX <= bounds.minX || bounds.maxY <= bounds.minY) {
       setAssignments([]);
@@ -61,6 +70,7 @@ export function LayoutEditorPage() {
       const values = await api.assignments(projectId, layoutId, bounds);
       if (sequence !== viewportSequence.current) return;
       setAssignments(values);
+      setSelected((current) => current ? values.find((item) => item.slotIndex === current.slotIndex) ?? current : null);
       void loadPhotoUrls(values).catch(() => setStatus('部分缩略图暂时无法加载'));
     } catch (cause) {
       if (sequence === viewportSequence.current) setError(messageOf(cause));
@@ -95,6 +105,7 @@ export function LayoutEditorPage() {
       recovery.clear();
       setPendingCount(pendingRef.current.length);
       setStatus(`已保存为版本 ${result.version.versionNumber}`);
+      if (lastViewport.current) await loadViewport(lastViewport.current);
     } catch (cause) {
       const failure = cause as ApiFailure;
       if (failure.status === 409) {
@@ -114,7 +125,7 @@ export function LayoutEditorPage() {
         window.setTimeout(() => void flush(), AUTOSAVE_DELAY_MS);
       }
     }
-  }, [api, layoutId, projectId, recovery, reload, setLayout]);
+  }, [api, layoutId, loadViewport, projectId, recovery, reload, setLayout]);
 
   const enqueue = useCallback((command: EditCommand) => {
     if (layoutRef.current?.state !== 'DRAFT') return;
@@ -135,6 +146,17 @@ export function LayoutEditorPage() {
       }
     }).catch((cause) => setError(messageOf(cause)));
   }, [layoutId, projectId, recovery, reload, token]);
+
+  useEffect(() => {
+    if (!projectId || !token) return;
+    void photoApi.photos(projectId).then(setLibraryPhotos).catch((cause) => setError(messageOf(cause)));
+  }, [photoApi, projectId, token]);
+  useEffect(() => {
+    if (!layout || !projectId) return;
+    void photoApi.layouts(projectId).then((values) => setNewerLayout(
+      values.find((item) => item.id !== layout.id && item.maskId === layout.maskId && item.state === 'DRAFT') ?? null,
+    )).catch(() => undefined);
+  }, [layout?.id, layout?.maskId, photoApi, projectId]);
 
   useEffect(() => {
     if (!pendingCount || savingRef.current) return;
@@ -175,11 +197,20 @@ export function LayoutEditorPage() {
     enqueue({ type: 'SWAP', slotIndex: selected.slotIndex, secondarySlotIndex: Number(swapSlot) });
     setStatus('交换操作将在后台保存；视图将在保存后按需刷新');
   };
-  const applyReplace = () => {
-    if (!selected || !replacePhotoId.trim()) return;
-    enqueue({ type: 'REPLACE', slotIndex: selected.slotIndex, photoId: replacePhotoId.trim() });
+  const applyReplace = (photoId: string) => {
+    if (!selected || selected.photoId === photoId) return;
+    enqueue({ type: 'REPLACE', slotIndex: selected.slotIndex, photoId });
     setAssignments((current) => current.map((item) => item.slotIndex === selected.slotIndex
-      ? { ...item, photoId: replacePhotoId.trim() } : item));
+      ? { ...item, photoId } : item));
+    setSelected({ ...selected, photoId });
+    setReplaceOpen(false);
+  };
+  const unlock = async () => {
+    if (!layout || layout.state !== 'LOCKED') return;
+    setUnlocking(true);
+    try { setLayout(await api.unlockLayout(projectId, layoutId, layout.lockVersion)); setStatus('布局已解锁，可以更换照片'); }
+    catch (cause) { setError(messageOf(cause)); }
+    finally { setUnlocking(false); }
   };
   const applyCrop = () => {
     if (!selected) return;
@@ -196,15 +227,19 @@ export function LayoutEditorPage() {
   }
   if (!layout) return <main className="setup-panel"><h1>布局编辑器</h1><p>{error || status}</p></main>;
   const editable = layout.state === 'DRAFT';
+  const eligiblePhotos = libraryPhotos.filter((photo) => photo.status === 'AVAILABLE' && photo.analysisStatus === 'SUCCEEDED');
+  const matchingPhotos = eligiblePhotos.filter((photo) => photo.originalFilename.toLocaleLowerCase().includes(photoSearch.toLocaleLowerCase())).slice(0, 60);
+  const selectedPhoto = selected ? libraryPhotos.find((photo) => photo.id === selected.photoId) : null;
 
   return <main className="editor-shell">
     <header className="topbar">
       <div><Typography.Title level={5}>{layout.name}</Typography.Title>
-        <Tag color={layout.state === 'PUBLISHED' ? 'success' : layout.state === 'LOCKED' ? 'warning' : 'processing'}>{layout.state}</Tag>
+        <Tag color={layout.state === 'PUBLISHED' ? 'success' : layout.state === 'LOCKED' ? 'warning' : 'processing'}>{statusLabel(layout.state)}</Tag>
         <Typography.Text type="secondary">版本 {layout.currentVersionNumber} · 修订 {layout.currentRevision}</Typography.Text></div>
       <Space className="toolbar" wrap>
         <Button href="?view=dashboard">工作台</Button>
-        <Button type="primary" href={`?projectId=${projectId}&layoutId=${layoutId}&view=surface`}>三维预览</Button>
+        {layout.state === 'LOCKED' && <Button loading={unlocking} onClick={() => void unlock()}>解锁并编辑</Button>}
+        <Button type="primary" href={`?view=dashboard&step=surface&projectId=${projectId}`}>下一步：三维效果</Button>
         <Button icon={<ZoomInOutlined />} onClick={() => canvasRef.current?.zoom(1.2)}>放大</Button>
         <Button icon={<ZoomOutOutlined />} onClick={() => canvasRef.current?.zoom(1 / 1.2)}>缩小</Button>
         <Button icon={<CompressOutlined />} onClick={() => canvasRef.current?.fit()}>适应画布</Button>
@@ -220,15 +255,20 @@ export function LayoutEditorPage() {
         onSelect={select} onViewport={debounceViewport(loadViewport)} />
       <aside className="inspector">
         <Typography.Title level={5}>槽位编辑</Typography.Title>
+        {newerLayout && layout.state !== 'DRAFT' && <Alert type="warning" showIcon title="正在查看旧版排版"
+          description={<a href={`?view=editor&projectId=${projectId}&layoutId=${newerLayout.id}`}>打开使用新照片生成的可编辑排版</a>} />}
         {!selected && <Typography.Paragraph type="secondary">点击画布中的照片开始编辑。</Typography.Paragraph>}
         {selected && <>
-          <dl><dt>槽位</dt><dd>{selected.slotIndex}</dd><dt>照片</dt><dd title={selected.photoId}>{selected.photoId}</dd></dl>
+          <dl><dt>槽位</dt><dd>{selected.slotIndex}</dd><dt>照片</dt><dd title={selectedPhoto?.originalFilename ?? selected.photoId}>{selectedPhoto?.originalFilename ?? selected.photoId}</dd></dl>
+          {photoUrls.get(selected.photoId) && <img className="inspector-photo" src={photoUrls.get(selected.photoId)} alt={selectedPhoto?.originalFilename ?? '当前照片'} />}
+          {!editable && <Alert type="info" showIcon title="此布局已锁定" description="点击上方“解锁并编辑”后，可以更换槽位照片。" />}
           <label>与槽位交换<Input disabled={!editable} inputMode="numeric" value={swapSlot}
             onChange={(event) => setSwapSlot(event.target.value)} /></label>
           <Button block disabled={!editable} onClick={applySwap}>交换</Button>
-          <label>替换为照片 UUID<Input disabled={!editable} value={replacePhotoId}
-            onChange={(event) => setReplacePhotoId(event.target.value)} /></label>
-          <Button block disabled={!editable} onClick={applyReplace}>替换</Button>
+          <Button block type="primary" disabled={!editable} onClick={() => {
+            setPhotoSearch(''); setReplaceOpen(true);
+            void photoApi.photos(projectId).then(setLibraryPhotos).catch((cause) => setError(messageOf(cause)));
+          }}>从素材库更换照片</Button>
           <fieldset disabled={!editable}><legend>裁剪框（0–1）</legend>
             {(['x', 'y', 'width', 'height'] as const).map((key) => <label key={key}>{key}
               <InputNumber min={0} max={1} step={0.01} value={crop[key]}
@@ -239,10 +279,36 @@ export function LayoutEditorPage() {
         </>}
       </aside>
     </section>
+    <Modal title={`替换槽位 ${selected?.slotIndex ?? ''} 的照片`} open={replaceOpen} onCancel={() => setReplaceOpen(false)} footer={null} width={760}>
+      <Input.Search placeholder="按照片名称搜索" value={photoSearch} onChange={(event) => setPhotoSearch(event.target.value)} allowClear />
+      <p className="photo-picker-hint">可选择 {eligiblePhotos.length} 张已完成分析的照片；点击缩略图即可替换并自动保存。</p>
+      {matchingPhotos.length ? <div className="photo-picker-grid">
+        {replaceOpen && matchingPhotos.map((photo) => <PhotoChoice key={photo.id} api={photoApi} projectId={projectId} photo={photo}
+          active={photo.id === selected?.photoId} onChoose={() => applyReplace(photo.id)} />)}
+      </div> : <Empty description={eligiblePhotos.length ? '没有符合搜索条件的照片' : '照片分析完成后才能选择'} />}
+      {matchingPhotos.length === 60 && <p className="photo-picker-hint">仅显示前 60 张，请输入名称缩小范围。</p>}
+    </Modal>
     <footer className="statusbar"><Typography.Text>{status}{pendingCount ? `（待保存 ${pendingCount}）` : ''}</Typography.Text>
       <span>{error && <Alert type="error" showIcon title={error} />}</span>
       <Typography.Text type="secondary">当前视口 {assignments.length} 个槽位</Typography.Text></footer>
   </main>;
+}
+
+function PhotoChoice({ api, projectId, photo, active, onChoose }: {
+  api: OperationsApi; projectId: string; photo: PhotoSummary; active: boolean; onChoose: () => void;
+}) {
+  const [url, setUrl] = useState('');
+  useEffect(() => {
+    let live = true;
+    void api.photoPreview(projectId, photo.id).then((preview) => {
+      if (live) setUrl(preview.thumbnail.url);
+    }).catch(() => undefined);
+    return () => { live = false; };
+  }, [api, projectId, photo.id]);
+  return <button type="button" className={`photo-picker-item${active ? ' active' : ''}`} disabled={active} onClick={onChoose}>
+    {url ? <img src={url} alt="" loading="lazy" /> : <span className="photo-picker-placeholder">预览加载中</span>}
+    <span title={photo.originalFilename}>{photo.originalFilename}</span>
+  </button>;
 }
 
 function messageOf(cause: unknown): string {

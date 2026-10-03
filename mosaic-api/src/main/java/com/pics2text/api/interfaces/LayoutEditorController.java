@@ -25,8 +25,11 @@ import java.util.Map;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -56,6 +59,24 @@ public class LayoutEditorController {
     @GetMapping("/{layoutId}")
     public LayoutResponse get(@PathVariable UUID projectId, @PathVariable UUID layoutId) {
         return LayoutResponse.from(service.get(projectId, layoutId));
+    }
+
+    @PatchMapping("/{layoutId}")
+    public LayoutResponse rename(@PathVariable UUID projectId, @PathVariable UUID layoutId,
+            @Valid @RequestBody RenameLayoutRequest request) {
+        return LayoutResponse.from(service.rename(projectId, layoutId, request.name(),
+                request.expectedLockVersion()));
+    }
+
+    @DeleteMapping("/{layoutId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void delete(@PathVariable UUID projectId, @PathVariable UUID layoutId) {
+        service.delete(projectId, layoutId);
+    }
+
+    @PutMapping("/{layoutId}/activate")
+    public LayoutResponse activate(@PathVariable UUID projectId, @PathVariable UUID layoutId) {
+        return LayoutResponse.from(service.activate(projectId, layoutId));
     }
 
     @GetMapping("/{layoutId}/assignments")
@@ -153,6 +174,8 @@ public class LayoutEditorController {
 
     public record CreateLayoutRequest(@NotNull UUID sourceAutoLayoutId,
             @NotBlank @Size(max = 120) String name) { }
+    public record RenameLayoutRequest(@NotBlank @Size(max = 120) String name,
+            @Min(0) long expectedLockVersion) { }
 
     public record EditBatchRequest(@Min(0) long expectedLockVersion, @NotNull UUID clientBatchId,
             @Size(max = 500) String note,

@@ -35,6 +35,27 @@ public interface LayoutEditorMapper {
     List<EditableLayoutEntity> listLayouts(@Param("projectId") UUID projectId,
             @Param("limit") int limit, @Param("offset") long offset);
 
+    @Update("""
+            UPDATE editable_layout SET name = #{name}, lock_version = lock_version + 1,
+              updated_at = #{now}
+            WHERE id = #{layoutId} AND lock_version = #{expectedLockVersion}
+            """)
+    int renameLayout(@Param("layoutId") UUID layoutId, @Param("name") String name,
+            @Param("expectedLockVersion") long expectedLockVersion, @Param("now") Instant now);
+
+    @Select("SELECT COUNT(*) FROM surface_layout_binding WHERE layout_id = #{layoutId}")
+    int countSurfaceBindings(@Param("layoutId") UUID layoutId);
+
+    @Update("UPDATE editable_layout SET current_version_id = NULL, published_version_id = NULL WHERE id = #{layoutId}")
+    int clearVersionReferences(@Param("layoutId") UUID layoutId);
+
+    @Delete("DELETE FROM editable_layout WHERE id = #{layoutId}")
+    int deleteLayout(@Param("layoutId") UUID layoutId);
+
+    @Update("UPDATE mosaic_project SET active_layout_id = #{layoutId}, updated_at = #{now} WHERE id = #{projectId}")
+    int activateLayout(@Param("projectId") UUID projectId, @Param("layoutId") UUID layoutId,
+            @Param("now") Instant now);
+
     @Insert("""
             INSERT INTO layout_draft_assignment
               (layout_id, slot_index, photo_id, x, y, width, height, crop_x, crop_y, crop_width, crop_height)
@@ -83,7 +104,7 @@ public interface LayoutEditorMapper {
             @Param("limit") int limit);
 
     @Select({"<script>",
-            "SELECT DISTINCT p.id AS photo_id, p.thumbnail_key FROM layout_draft_assignment a",
+            "SELECT DISTINCT p.id AS photo_id, COALESCE(p.preview_key, p.source_key, p.original_key) AS preview_key FROM layout_draft_assignment a",
             " JOIN photo_asset p ON p.id = a.photo_id WHERE a.layout_id = #{layoutId}",
             " AND p.id IN",
             "<foreach collection='photoIds' item='photoId' open='(' separator=',' close=')'>#{photoId}</foreach>",

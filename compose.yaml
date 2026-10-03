@@ -11,6 +11,7 @@ services:
       - "${POSTGRES_PORT:-15432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql
+      - ./infrastructure/postgres/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
@@ -43,6 +44,7 @@ services:
       - "${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
     volumes:
       - rabbitmq-data:/var/lib/rabbitmq
+      - ./observability/rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 10s
@@ -52,7 +54,7 @@ services:
 
   object-storage:
     image: chrislusf/seaweedfs:4.47
-    command: ["server", "-s3", "-dir=/data"]
+    command: ["server", "-s3", "-dir=/data", "-metricsPort=9327", "-metricsIp=0.0.0.0"]
     environment:
       AWS_ACCESS_KEY_ID: ${S3_ACCESS_KEY:-pics2text}
       AWS_SECRET_ACCESS_KEY: ${S3_SECRET_KEY:-pics2text_dev_secret}
@@ -95,10 +97,16 @@ services:
       PRINT_RENDER_TIMEOUT: ${PRINT_RENDER_TIMEOUT:-6h}
       PRINT_RENDER_STALE_TEMP_AGE: ${PRINT_RENDER_STALE_TEMP_AGE:-24h}
       PRINT_RENDER_CLEANUP_INTERVAL: ${PRINT_RENDER_CLEANUP_INTERVAL:-1h}
+      PRINT_RENDER_TEMP_SPACE_CHECK_INTERVAL: ${PRINT_RENDER_TEMP_SPACE_CHECK_INTERVAL:-30s}
       TMPDIR: /var/tmp/pics2text-render
       JAVA_TOOL_OPTIONS: -Djava.io.tmpdir=/var/tmp/pics2text-render
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://host.docker.internal:4318/v1/traces
+      TRACING_SAMPLING_PROBABILITY: ${TRACING_SAMPLING_PROBABILITY:-1.0}
+      DEPLOYMENT_ENVIRONMENT: ${DEPLOYMENT_ENVIRONMENT:-local}
     ports:
       - "${RENDER_WORKER_PORT:-18082}:18082"
+    extra_hosts:
+      - host.docker.internal:host-gateway
     volumes:
       - render-worker-temp:/var/tmp/pics2text-render
     depends_on:
@@ -120,9 +128,116 @@ services:
       - no-new-privileges:true
     restart: unless-stopped
 
+  otel-collector:
+    profiles: ["observability"]
+    image: otel/opentelemetry-collector-contrib:0.161.0
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    volumes:
+      - ./observability/otel-collector.yaml:/etc/otelcol-contrib/config.yaml:ro
+    ports:
+      - "${OTEL_GRPC_PORT:-4317}:4317"
+      - "${OTEL_HTTP_PORT:-4318}:4318"
+    depends_on:
+      - tempo
+    restart: unless-stopped
+
+  tempo:
+    profiles: ["observability"]
+    image: grafana/tempo:2.10.7
+    command: ["-config.file=/etc/tempo.yaml"]
+    volumes:
+      - ./observability/tempo.yaml:/etc/tempo.yaml:ro
+      - tempo-data:/var/tempo
+    restart: unless-stopped
+
+  prometheus:
+    profiles: ["observability"]
+    image: prom/prometheus:v3.13.3
+    command:
+      - --config.file=/etc/prometheus/prometheus.yaml
+      - --storage.tsdb.path=/prometheus
+      - --web.enable-lifecycle
+    volumes:
+      - ./observability/prometheus/prometheus.yaml:/etc/prometheus/prometheus.yaml:ro
+      - ./observability/prometheus/alerts.yaml:/etc/prometheus/alerts.yaml:ro
+      - prometheus-data:/prometheus
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    ports:
+      - "${PROMETHEUS_PORT:-19090}:9090"
+    restart: unless-stopped
+
+  postgres-exporter:
+    profiles: ["observability"]
+    image: quay.io/prometheuscommunity/postgres-exporter:v0.20.1
+    command: ["--config.file=/etc/postgres-exporter/postgres_exporter.yml"]
+    environment:
+      DATA_SOURCE_URI: postgres:5432/${POSTGRES_DB:-pics2text}?sslmode=disable
+      DATA_SOURCE_USER: ${POSTGRES_MONITOR_USER:-pics2text_monitor}
+      DATA_SOURCE_PASS: ${POSTGRES_MONITOR_PASSWORD:-pics2text_monitor_dev}
+    volumes:
+      - ./observability/postgres-exporter.yaml:/etc/postgres-exporter/postgres_exporter.yml:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  redis-exporter:
+    profiles: ["observability"]
+    image: oliver006/redis_exporter:v1.92.0
+    environment:
+      REDIS_ADDR: redis://redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  loki:
+    profiles: ["observability"]
+    image: grafana/loki:3.7.8
+    command: ["-config.file=/etc/loki/local-config.yaml"]
+    volumes:
+      - ./observability/loki.yaml:/etc/loki/local-config.yaml:ro
+      - loki-data:/loki
+    restart: unless-stopped
+
+  alloy:
+    profiles: ["observability"]
+    image: grafana/alloy:v1.18.1
+    command: ["run", "/etc/alloy/config.alloy"]
+    volumes:
+      - ./observability/alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - loki
+    restart: unless-stopped
+
+  grafana:
+    profiles: ["observability"]
+    image: grafana/grafana:13.2.3
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-pics2text_dev}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "${GRAFANA_PORT:-13000}:3000"
+    depends_on:
+      - prometheus
+      - tempo
+      - loki
+    restart: unless-stopped
+
 volumes:
   postgres-data:
   redis-data:
   rabbitmq-data:
   object-storage-data:
   render-worker-temp:
+  tempo-data:
+  prometheus-data:
+  loki-data:
+  grafana-data:

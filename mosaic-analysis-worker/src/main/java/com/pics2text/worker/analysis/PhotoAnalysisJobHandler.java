@@ -101,7 +101,7 @@ public class PhotoAnalysisJobHandler implements JobHandler {
                     variant(photoId, PhotoVariantType.THUMBNAIL_256, thumbnailKey, thumbnail, now),
                     variant(photoId, PhotoVariantType.PREVIEW_1024, previewKey, preview, now),
                     variant(photoId, PhotoVariantType.ANALYSIS_2048, analysisKey, analysisImage, now));
-            persistence.complete(analysis, variants, review.reviewStatus().name(), sanitizedKey,
+            persistence.complete(analysis, variants, ReviewStatus.APPROVED.name(), sanitizedKey,
                     thumbnailKey, previewKey, oriented.cols(), oriented.rows(), similarity.photoId());
             return objectMapper.writeValueAsString(Map.of(
                     "photoId", photoId,

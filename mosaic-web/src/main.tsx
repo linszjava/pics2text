@@ -22,8 +22,9 @@ const page = view === 'login' || !authToken()
       ? <LayoutEditorPage />
       : <OperationsDashboard />;
 createRoot(document.getElementById('root')!).render(<StrictMode>
-  <ConfigProvider locale={zhCN} theme={{ algorithm: theme.darkAlgorithm, token: {
-    colorPrimary: '#4da8e8', colorBgBase: '#0d1117', borderRadius: 8,
-    fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif',
+  <ConfigProvider locale={zhCN} theme={{ algorithm: theme.defaultAlgorithm, token: {
+    colorPrimary: '#147db6', colorBgBase: '#ffffff', colorBgLayout: '#f5f8fb', colorText: '#17344b',
+    colorBorder: '#dce3e6', borderRadius: 10,
+    fontFamily: 'Inter, "PingFang SC", "Microsoft YaHei", ui-sans-serif, system-ui, sans-serif',
   } }}><App><Suspense fallback={<main className="setup-panel">正在加载应用…</main>}>{page}</Suspense></App></ConfigProvider>
 </StrictMode>);

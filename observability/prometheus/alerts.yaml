@@ -1,0 +1,125 @@
+groups:
+  - name: pics2text-runtime
+    rules:
+      - alert: Pics2TextServiceDown
+        expr: up{job=~"mosaic-.+"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.job }} 已不可用"
+          description: "Prometheus 连续 2 分钟无法抓取 {{ $labels.instance }}。"
+
+      - alert: Pics2TextJobFailures
+        expr: sum(increase(pics2text_jobs_executions_total{result="failed"}[5m])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "过去 5 分钟出现作业失败"
+          description: "失败作业数：{{ $value }}。"
+
+      - alert: Pics2TextQueueBacklog
+        expr: sum(rabbitmq_queue_messages_ready{queue=~"mosaic\\..+"}) > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "作业队列持续积压"
+          description: "待处理消息数：{{ $value }}。"
+
+      - alert: Pics2TextJvmHeapHigh
+        expr: sum by (job, instance) (jvm_memory_used_bytes{area="heap"}) / sum by (job, instance) (jvm_memory_max_bytes{area="heap"}) > 0.85
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.job }} 堆内存持续偏高"
+          description: "堆内存使用率已连续 10 分钟超过 85%。"
+
+      - alert: Pics2TextProcessRssHigh
+        expr: pics2text_process_resident_memory_bytes > 1610612736
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.job }} 原生 RSS 持续偏高"
+          description: "进程 RSS 已连续 10 分钟超过 1.5 GiB。"
+
+      - alert: Pics2TextDatabasePoolSaturated
+        expr: hikaricp_connections_active / hikaricp_connections_max > 0.85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.job }} 数据库连接池接近耗尽"
+          description: "HikariCP 活跃连接连续 5 分钟超过最大连接数的 85%。"
+
+      - alert: Pics2TextPostgresExporterDown
+        expr: pg_up == 0 or up{job="postgres"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "PostgreSQL 指标采集失败"
+          description: "PostgreSQL 或 exporter 连续 2 分钟不可用。"
+
+      - alert: Pics2TextRedisExporterDown
+        expr: redis_up == 0 or up{job="redis"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Redis 指标采集失败"
+          description: "Redis 或 exporter 连续 2 分钟不可用。"
+
+      - alert: Pics2TextRedisMemoryHigh
+        expr: redis_memory_max_bytes > 0 and redis_memory_used_bytes / redis_memory_max_bytes > 0.85
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis 内存持续偏高"
+          description: "Redis 内存使用率已连续 10 分钟超过 85%。"
+
+      - alert: Pics2TextObjectStorageMetricsDown
+        expr: up{job="object-storage"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "对象存储指标端点不可用"
+          description: "SeaweedFS 指标端点连续 2 分钟无法抓取。"
+
+      - alert: Pics2TextPhotoObjectCleanupFailure
+        expr: increase(pics2text_photo_cleanup_operations_total{result="failure"}[10m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "照片对象物理删除失败"
+          description: "最近 10 分钟内至少一次照片对象清理失败，需检查对象存储和保留期清理日志。"
+
+      - alert: Pics2TextRenderObjectStorageFailure
+        expr: sum(increase(pics2text_render_object_storage_operations_total{result="failure"}[10m])) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "渲染 Worker 对象存储操作失败"
+          description: "最近 10 分钟内至少一次渲染文件上传或下载失败。"
+
+      - alert: Pics2TextRenderTempSpaceLow
+        expr: (pics2text_render_temp_total_bytes > 0 and pics2text_render_temp_usable_bytes / pics2text_render_temp_total_bytes < 0.10) or pics2text_render_temp_usable_bytes < 5368709120
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "高清渲染临时磁盘空间不足"
+          description: "渲染临时目录可用空间低于 10% 或 5 GiB。"
+
+      - alert: Pics2TextRenderTempSpaceCheckFailure
+        expr: increase(pics2text_render_temp_space_checks_total{result="failure"}[10m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "无法读取高清渲染临时磁盘容量"
+          description: "最近 10 分钟内至少一次临时目录容量检查失败。"

@@ -16,6 +16,16 @@ export class LayoutApi {
     return this.request(`/api/v1/projects/${projectId}/editable-layouts/${layoutId}`);
   }
 
+  unlockLayout(projectId: string, layoutId: string, expectedLockVersion: number): Promise<EditableLayout> {
+    return this.request(`/api/v1/projects/${projectId}/editable-layouts/${layoutId}/unlock`, {
+      method: 'POST', body: JSON.stringify({ expectedLockVersion }),
+    });
+  }
+
+  getTextMask(projectId: string, maskId: string): Promise<{ text: string; direction: 'HORIZONTAL' | 'VERTICAL' }> {
+    return this.request(`/api/v1/projects/${projectId}/text-masks/${maskId}`);
+  }
+
   assignments(projectId: string, layoutId: string, viewport?: ViewportQuery,
       photoId?: string, slotIndex?: number): Promise<Assignment[]> {
     const params = new URLSearchParams({ limit: '5000' });

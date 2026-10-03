@@ -2,21 +2,15 @@ package com.pics2text.api.application;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.pics2text.api.common.ApiException;
 import com.pics2text.api.infrastructure.persistence.ProjectEntity;
 import com.pics2text.api.infrastructure.persistence.ProjectMapper;
-import com.pics2text.api.infrastructure.persistence.ProjectMemberEntity;
-import com.pics2text.api.infrastructure.persistence.ProjectMemberMapper;
 import com.pics2text.identity.domain.GlobalRole;
 import com.pics2text.identity.domain.User;
 import com.pics2text.identity.domain.UserStatus;
 import com.pics2text.project.domain.ProjectPermission;
-import com.pics2text.project.domain.ProjectRole;
 import java.time.Instant;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -28,64 +22,65 @@ import org.springframework.http.HttpStatus;
 
 @ExtendWith(MockitoExtension.class)
 class ProjectAccessServiceTest {
-
-    @Mock
-    private AuthenticationService authenticationService;
-    @Mock
-    private ProjectMapper projectMapper;
-    @Mock
-    private ProjectMemberMapper projectMemberMapper;
+    @Mock private AuthenticationService authenticationService;
+    @Mock private ProjectMapper projectMapper;
 
     private ProjectAccessService service;
     private UUID projectId;
 
     @BeforeEach
     void setUp() {
-        service = new ProjectAccessService(authenticationService, projectMapper, projectMemberMapper);
+        service = new ProjectAccessService(authenticationService, projectMapper);
         projectId = UUID.randomUUID();
-        when(projectMapper.selectById(projectId)).thenReturn(new ProjectEntity());
     }
 
     @Test
-    void globalAdministratorCanAccessEveryProject() {
-        User administrator = user(GlobalRole.ADMIN);
-        when(authenticationService.currentUser()).thenReturn(administrator);
-
-        assertEquals(administrator, service.require(projectId, ProjectPermission.MANAGE_MEMBERS));
-        verify(projectMemberMapper, never()).find(any(), any());
-    }
-
-    @Test
-    void viewerCannotManageProjectMembers() {
-        User viewer = user(GlobalRole.USER);
-        when(authenticationService.currentUser()).thenReturn(viewer);
-        when(projectMemberMapper.find(projectId, viewer.id())).thenReturn(new ProjectMemberEntity(
-                projectId, viewer.id(), ProjectRole.VIEWER.name(), UUID.randomUUID(), Instant.now()));
-
-        ApiException exception = assertThrows(
-                ApiException.class,
-                () -> service.require(projectId, ProjectPermission.MANAGE_MEMBERS));
-
-        assertEquals(HttpStatus.FORBIDDEN, exception.status());
-        assertEquals("PROJECT_ACCESS_DENIED", exception.code());
-    }
-
-    @Test
-    void memberCannotAccessAProjectWithoutMembership() {
-        User user = user(GlobalRole.USER);
+    void creatorCanUseOwnProject() {
+        User user = user();
+        ProjectEntity project = new ProjectEntity();
+        project.setCreatedBy(user.id());
+        when(projectMapper.selectById(projectId)).thenReturn(project);
         when(authenticationService.currentUser()).thenReturn(user);
-        when(projectMemberMapper.find(projectId, user.id())).thenReturn(null);
 
-        ApiException exception = assertThrows(
-                ApiException.class,
+        assertEquals(user, service.require(projectId, ProjectPermission.VIEW));
+        assertEquals(user, service.require(projectId, ProjectPermission.MANAGE_PROJECT));
+        assertEquals(project, service.requireProject(projectId));
+    }
+
+    @Test
+    void otherUserCannotAccessProject() {
+        User user = user();
+        ProjectEntity project = new ProjectEntity();
+        project.setCreatedBy(UUID.randomUUID());
+        when(projectMapper.selectById(projectId)).thenReturn(project);
+        when(authenticationService.currentUser()).thenReturn(user);
+
+        ApiException viewException = assertThrows(ApiException.class,
+                () -> service.require(projectId, ProjectPermission.VIEW));
+        ApiException manageException = assertThrows(ApiException.class,
+                () -> service.require(projectId, ProjectPermission.MANAGE_PROJECT));
+        ApiException projectException = assertThrows(ApiException.class,
+                () -> service.requireProject(projectId));
+
+        assertEquals(HttpStatus.NOT_FOUND, viewException.status());
+        assertEquals(HttpStatus.NOT_FOUND, manageException.status());
+        assertEquals(HttpStatus.NOT_FOUND, projectException.status());
+    }
+
+    @Test
+    void missingProjectStillReturnsNotFound() {
+        when(authenticationService.currentUser()).thenReturn(user());
+        when(projectMapper.selectById(projectId)).thenReturn(null);
+
+        ApiException exception = assertThrows(ApiException.class,
                 () -> service.require(projectId, ProjectPermission.VIEW));
 
-        assertEquals(HttpStatus.FORBIDDEN, exception.status());
+        assertEquals(HttpStatus.NOT_FOUND, exception.status());
     }
 
-    private User user(GlobalRole role) {
+    private User user() {
         Instant now = Instant.now();
-        return new User(
-                UUID.randomUUID(), "tester", "hash", "Tester", role, UserStatus.ACTIVE, now, now);
+        return new User(UUID.randomUUID(), "tester", "hash", "Tester",
+                GlobalRole.USER, UserStatus.ACTIVE, now, now);
     }
 }

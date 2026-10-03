@@ -123,6 +123,22 @@ public class TextMaskService {
         return storage.presignGet(key, filename);
     }
 
+    @Transactional
+    public void delete(UUID projectId, UUID maskId) {
+        User actor = access.require(projectId, ProjectPermission.EDIT_LAYOUT);
+        TextMaskDesignEntity mask = require(projectId, maskId);
+        deleteObject(mask.getMaskKey());
+        deleteObject(mask.getDebugKey());
+        mapper.deleteById(maskId);
+        audit.record(actor.id(), "TEXT_MASK_DELETE", "TEXT_MASK", maskId.toString(), true);
+    }
+
+    private void deleteObject(String key) {
+        if (key != null && !key.isBlank()) {
+            try { storage.delete(key); } catch (RuntimeException ignored) { }
+        }
+    }
+
     private TextMaskDesignEntity require(UUID projectId, UUID maskId) {
         TextMaskDesignEntity design = mapper.selectById(maskId);
         if (design == null || !projectId.equals(design.getProjectId())) {

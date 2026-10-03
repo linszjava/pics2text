@@ -68,7 +68,9 @@ export interface SurfaceManifest {
     scaleXmmPerPx: number; scaleYmmPerPx: number };
   regions: Array<{ regionIndex: number; type: 'NO_PRINT' | 'COMPARTMENT' | 'STRUCTURE' | 'REFERENCE';
     name: string; blocking: boolean; xMm: number; yMm: number; widthMm: number; heightMm: number }>;
-  slots: Array<unknown>;
+  slots: Array<{ slotIndex: number; photoId: string;
+    physical: { x: number; y: number; width: number; height: number };
+    crop: { x: number; y: number; width: number; height: number } }>;
 }
 
 export interface SurfacePreviewData {

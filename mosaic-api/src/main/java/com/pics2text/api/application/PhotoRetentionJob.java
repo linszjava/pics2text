@@ -2,7 +2,6 @@ package com.pics2text.api.application;
 
 import com.pics2text.api.infrastructure.persistence.PhotoAssetEntity;
 import com.pics2text.api.infrastructure.persistence.PhotoAssetMapper;
-import com.pics2text.api.infrastructure.storage.ObjectStorageGateway;
 import com.pics2text.photoasset.domain.PhotoAssetStatus;
 import java.time.Instant;
 import org.slf4j.Logger;
@@ -14,11 +13,11 @@ import org.springframework.stereotype.Component;
 public class PhotoRetentionJob {
     private static final Logger log = LoggerFactory.getLogger(PhotoRetentionJob.class);
     private final PhotoAssetMapper mapper;
-    private final ObjectStorageGateway storage;
+    private final PhotoObjectDeletionService deletionService;
 
-    public PhotoRetentionJob(PhotoAssetMapper mapper, ObjectStorageGateway storage) {
+    public PhotoRetentionJob(PhotoAssetMapper mapper, PhotoObjectDeletionService deletionService) {
         this.mapper = mapper;
-        this.storage = storage;
+        this.deletionService = deletionService;
     }
 
     @Scheduled(fixedDelayString = "${object-storage.cleanup-interval:PT1H}")
@@ -30,14 +29,7 @@ public class PhotoRetentionJob {
 
     private void cleanup(PhotoAssetEntity asset, boolean expiredUpload) {
         try {
-            if (expiredUpload && asset.getMultipartUploadId() != null
-                    && PhotoAssetStatus.UPLOADING.name().equals(asset.getStatus())) {
-                storage.abortMultipart(asset.getOriginalKey(), asset.getMultipartUploadId());
-            } else {
-                storage.delete(asset.getOriginalKey());
-            }
-            storage.delete(asset.getThumbnailKey());
-            storage.delete(asset.getPreviewKey());
+            deletionService.deleteAll(asset);
             Instant completedAt = now();
             if (PhotoAssetStatus.FAILED.name().equals(asset.getStatus())) {
                 mapper.markObjectsDeleted(asset.getId(), completedAt);

@@ -128,6 +128,50 @@ public class LayoutEditorService {
         return mapper.listLayouts(projectId, safeSize, (long) safePage * safeSize);
     }
 
+    @Transactional
+    public EditableLayoutEntity rename(UUID projectId, UUID layoutId, String name,
+            long expectedLockVersion) {
+        User actor = access.require(projectId, ProjectPermission.EDIT_LAYOUT);
+        EditableLayoutEntity layout = requireLayout(projectId, layoutId);
+        if (name == null || name.isBlank() || name.length() > 120) {
+            throw bad("LAYOUT_NAME_INVALID", "布局名称不能为空且不能超过120个字符");
+        }
+        if (mapper.renameLayout(layoutId, name.trim(), expectedLockVersion, Instant.now()) == 0) {
+            throw conflict("LAYOUT_UPDATE_CONFLICT", "布局已被其他用户修改，请刷新后重试");
+        }
+        audit.record(actor.id(), "EDITABLE_LAYOUT_RENAME", "EDITABLE_LAYOUT", layoutId.toString(), true);
+        return mapper.findLayout(layoutId);
+    }
+
+    @Transactional
+    public EditableLayoutEntity activate(UUID projectId, UUID layoutId) {
+        User actor = access.require(projectId, ProjectPermission.EDIT_LAYOUT);
+        EditableLayoutEntity layout = requireLayout(projectId, layoutId);
+        if (EditableLayoutState.DRAFT.name().equals(layout.getState())) {
+            throw conflict("DRAFT_LAYOUT_ACTIVATE_FORBIDDEN", "草稿布局不能设为当前使用，请先完成并锁定布局");
+        }
+        mapper.activateLayout(projectId, layoutId, Instant.now());
+        audit.record(actor.id(), "EDITABLE_LAYOUT_ACTIVATE", "EDITABLE_LAYOUT", layoutId.toString(), true);
+        return layout;
+    }
+
+    @Transactional
+    public void delete(UUID projectId, UUID layoutId) {
+        User actor = access.require(projectId, ProjectPermission.EDIT_LAYOUT);
+        EditableLayoutEntity layout = requireLayout(projectId, layoutId);
+        if (EditableLayoutState.PUBLISHED.name().equals(layout.getState())) {
+            throw conflict("PUBLISHED_LAYOUT_DELETE_FORBIDDEN", "已发布布局不能删除");
+        }
+        if (mapper.countSurfaceBindings(layoutId) > 0) {
+            throw conflict("BOUND_LAYOUT_DELETE_FORBIDDEN", "已绑定三维曲面的布局不能删除，请先解除绑定");
+        }
+        mapper.clearVersionReferences(layoutId);
+        if (mapper.deleteLayout(layoutId) == 0) {
+            throw new ApiException("EDITABLE_LAYOUT_NOT_FOUND", "可编辑布局不存在", HttpStatus.NOT_FOUND);
+        }
+        audit.record(actor.id(), "EDITABLE_LAYOUT_DELETE", "EDITABLE_LAYOUT", layoutId.toString(), true);
+    }
+
     public List<LayoutEditorAssignmentEntity> assignments(UUID projectId, UUID layoutId,
             UUID photoId, Integer slotIndex, Integer minX, Integer minY, Integer maxX,
             Integer maxY, int limit) {
@@ -158,7 +202,7 @@ public class LayoutEditorService {
             throw bad("PHOTO_NOT_IN_LAYOUT", "部分照片不存在或不属于当前布局");
         }
         return photos.stream().map(photo -> {
-            var request = storage.presignGet(photo.thumbnailKey(), "layout-photo.webp");
+            var request = storage.presignGet(photo.previewKey(), "layout-photo.webp");
             return new PhotoPreviewUrl(photo.photoId(), request.url(), request.headers());
         }).toList();
     }

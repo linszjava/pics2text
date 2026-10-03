@@ -10,7 +10,6 @@ import com.pics2text.identity.domain.User;
 import com.pics2text.identity.domain.UsernamePolicy;
 import com.pics2text.identity.domain.UserStatus;
 import java.time.Instant;
-import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.dao.DuplicateKeyException;
@@ -89,33 +88,6 @@ public class UserService {
         return Optional.ofNullable(userMapper.selectById(userId))
                 .map(this::toDomain)
                 .orElseThrow(() -> new ApiException("USER_NOT_FOUND", "用户不存在", HttpStatus.NOT_FOUND));
-    }
-
-    public List<User> list() {
-        return userMapper.selectList(new LambdaQueryWrapper<UserEntity>()
-                        .orderByAsc(UserEntity::getCreatedAt)
-                        .last("LIMIT 200"))
-                .stream()
-                .map(this::toDomain)
-                .toList();
-    }
-
-    public long countActiveAdministrators() {
-        return userMapper.selectCount(new LambdaQueryWrapper<UserEntity>()
-                .eq(UserEntity::getGlobalRole, GlobalRole.ADMIN.name())
-                .eq(UserEntity::getStatus, UserStatus.ACTIVE.name()));
-    }
-
-    @Transactional
-    public User changeStatus(UUID userId, UserStatus status) {
-        UserEntity entity = userMapper.selectById(userId);
-        if (entity == null) {
-            throw new ApiException("USER_NOT_FOUND", "用户不存在", HttpStatus.NOT_FOUND);
-        }
-        entity.setStatus(status.name());
-        entity.setUpdatedAt(Instant.now());
-        userMapper.updateById(entity);
-        return toDomain(entity);
     }
 
     public boolean passwordMatches(User user, String password) {

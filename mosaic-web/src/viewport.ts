@@ -2,7 +2,7 @@ export interface ViewTransform { scale: number; x: number; y: number }
 export interface Bounds { minX: number; minY: number; maxX: number; maxY: number }
 
 export function clampScale(scale: number): number {
-  return Math.min(8, Math.max(0.05, scale));
+  return Math.min(64, Math.max(0.05, scale));
 }
 
 export function visibleBounds(transform: ViewTransform, width: number, height: number,

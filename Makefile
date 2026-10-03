@@ -1,4 +1,4 @@
-.PHONY: verify package web-install web-test web-build web-dev infra-up infra-down infra-status api analysis-worker render-worker render-worker-docker
+.PHONY: verify package web-install web-test web-build web-dev infra-up infra-down infra-status api analysis-worker render-worker render-worker-docker backup restore-drill
 
 verify:
 	./mvnw verify
@@ -41,3 +41,10 @@ render-worker:
 
 render-worker-docker:
 	docker compose --profile workers up -d --build render-worker
+
+backup:
+	./infrastructure/backup/create-backup.sh
+
+restore-drill:
+	@test -n "$(BACKUP_DIR)" || (echo "用法: make restore-drill BACKUP_DIR=backups/<备份目录>" >&2; exit 2)
+	./infrastructure/backup/restore-drill.sh "$(BACKUP_DIR)"

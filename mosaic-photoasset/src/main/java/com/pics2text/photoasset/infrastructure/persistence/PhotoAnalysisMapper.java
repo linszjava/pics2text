@@ -105,13 +105,4 @@ public interface PhotoAnalysisMapper {
     @Select("SELECT * FROM photo_variant WHERE photo_id = #{photoId} ORDER BY width")
     List<PhotoVariantEntity> listVariants(@Param("photoId") UUID photoId);
 
-    @Update("""
-            UPDATE photo_asset SET review_status = #{decision}, reviewed_by = #{reviewedBy},
-              reviewed_at = #{now}, review_note = #{note}, updated_at = #{now}
-            WHERE id = #{photoId} AND project_id = #{projectId}
-              AND status = 'AVAILABLE' AND analysis_status = 'SUCCEEDED'
-            """)
-    int manualReview(@Param("projectId") UUID projectId, @Param("photoId") UUID photoId,
-            @Param("decision") String decision, @Param("reviewedBy") UUID reviewedBy,
-            @Param("note") String note, @Param("now") Instant now);
 }

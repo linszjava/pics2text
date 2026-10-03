@@ -1,0 +1,119 @@
+{
+  "annotations": {"list": []},
+  "editable": false,
+  "graphTooltip": 1,
+  "panels": [
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "id": 1,
+      "targets": [{"expr": "sum by (result) (rate(pics2text_jobs_executions_total[5m]))", "legendFormat": "{{result}}", "refId": "A"}],
+      "title": "作业执行速率",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "id": 2,
+      "targets": [{"expr": "histogram_quantile(0.95, sum by (le, type) (rate(pics2text_jobs_duration_seconds_bucket[5m])))", "legendFormat": "{{type}}", "refId": "A"}],
+      "title": "作业耗时 P95",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "id": 3,
+      "targets": [{"expr": "sum by (job) (jvm_memory_used_bytes{area=\"heap\"}) / sum by (job) (jvm_memory_max_bytes{area=\"heap\"})", "legendFormat": "{{job}}", "refId": "A"}],
+      "title": "JVM 堆内存使用率",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "id": 4,
+      "targets": [{"expr": "sum by (queue) (rabbitmq_queue_messages_ready{queue=~\"mosaic\\\\..+\"})", "legendFormat": "{{queue}}", "refId": "A"}],
+      "title": "RabbitMQ 待处理消息",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "bytes"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+      "id": 5,
+      "targets": [{"expr": "pics2text_process_resident_memory_bytes", "legendFormat": "{{job}}", "refId": "A"}],
+      "title": "进程原生 RSS",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+      "id": 6,
+      "targets": [
+        {"expr": "hikaricp_connections_active / hikaricp_connections_max", "legendFormat": "数据库连接池 {{job}}", "refId": "A"},
+        {"expr": "redis_memory_max_bytes > 0 and redis_memory_used_bytes / redis_memory_max_bytes", "legendFormat": "Redis", "refId": "B"}
+      ],
+      "title": "基础设施容量使用率",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "short", "min": 0, "max": 1}, "overrides": []},
+      "gridPos": {"h": 6, "w": 24, "x": 0, "y": 24},
+      "id": 7,
+      "targets": [{"expr": "up{job=~\"postgres|redis|rabbitmq|object-storage\"}", "legendFormat": "{{job}}", "refId": "A"}],
+      "title": "基础设施采集状态",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "ops"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 30},
+      "id": 8,
+      "targets": [{"expr": "sum by (result) (rate(pics2text_photo_cleanup_operations_total[5m]))", "legendFormat": "{{result}}", "refId": "A"}],
+      "title": "照片对象清理速率",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 30},
+      "id": 9,
+      "targets": [{"expr": "histogram_quantile(0.95, sum by (le) (rate(pics2text_photo_cleanup_duration_seconds_bucket[5m])))", "legendFormat": "P95", "refId": "A"}],
+      "title": "照片对象清理耗时 P95",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "bytes"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 38},
+      "id": 10,
+      "targets": [
+        {"expr": "pics2text_render_temp_usable_bytes", "legendFormat": "可用", "refId": "A"},
+        {"expr": "pics2text_render_temp_total_bytes", "legendFormat": "总量", "refId": "B"}
+      ],
+      "title": "高清渲染临时磁盘",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "ops"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 38},
+      "id": 11,
+      "targets": [{"expr": "sum by (operation, result) (rate(pics2text_render_object_storage_operations_total[5m]))", "legendFormat": "{{operation}} {{result}}", "refId": "A"}],
+      "title": "渲染对象存储操作速率",
+      "type": "timeseries"
+    }
+  ],
+  "schemaVersion": 41,
+  "tags": ["pics2text", "operations"],
+  "templating": {"list": []},
+  "time": {"from": "now-1h", "to": "now"},
+  "title": "Pics2Text 运行概览",
+  "uid": "pics2text-overview",
+  "version": 4
+}

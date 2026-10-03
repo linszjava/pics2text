@@ -89,6 +89,18 @@ make web-build
 make infra-down
 ```
 
+本地数据保护命令：
+
+```bash
+# 在线导出 PostgreSQL，并短暂停止 SeaweedFS 生成一致的对象卷快照
+make backup
+
+# 仅恢复到临时 PostgreSQL 容器和临时对象卷，不覆盖当前业务数据
+make restore-drill BACKUP_DIR=backups/<备份目录>
+```
+
+备份默认写入被 Git 忽略的 `backups/`。恢复演练会先验证清单与 SHA-256，再检查业务表、对象文件和 SeaweedFS 健康状态，结束后自动清理临时资源。
+
 ## 配置约定
 
 Java 应用可通过环境变量覆盖默认连接信息，例如 `DB_URL`、`DB_USERNAME`、`DB_PASSWORD`、`REDIS_HOST`、`REDIS_PORT`、`RABBITMQ_HOST`、`RABBITMQ_PORT`、`S3_ENDPOINT`、`S3_PUBLIC_ENDPOINT`、`S3_ACCESS_KEY` 和 `S3_SECRET_KEY`。生产环境必须由密钥管理系统注入凭据，对象桶必须保持私有。

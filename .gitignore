@@ -26,6 +26,7 @@ mosaic-web/playwright-report/
 
 # 阶段进度说明仅保存在本地，不提交到远程仓库
 /docs/progress/
+/backups/
 Thumbs.db
 
 # Environment and secrets
@@ -37,6 +38,7 @@ Thumbs.db
 
 # Logs and temporary files
 *.log
+.tmp/
 tmp/
 temp/
 

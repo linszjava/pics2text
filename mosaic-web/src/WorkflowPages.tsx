@@ -1,65 +1,12 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { PlusOutlined } from '@ant-design/icons';
-import { App, Button, Card, Checkbox, Col, Form, Input, InputNumber, Modal, Popconfirm, Progress, Row, Segmented, Select, Space, Table, Tag, Typography } from 'antd';
+import { App, Button, Card, Checkbox, Col, Form, Image, Input, InputNumber, Modal, Popconfirm, Progress, Row, Segmented, Select, Skeleton, Space, Table, Tag, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { OperationsApi, type JobSummary, type PhotoSummary, type RenderSummary } from './operationsApi';
 import type { EditableLayout } from './types';
+import { jobTypeLabel, statusLabel } from './uiLabels';
 
 const { Paragraph } = Typography;
-
-export function PhotoReviewPage({ api, projectId, photos, loading, onChanged }: {
-  api: OperationsApi; projectId: string; photos: PhotoSummary[]; loading: boolean;
-  onChanged: (photos: PhotoSummary[]) => void;
-}) {
-  const { message } = App.useApp();
-  const [decision, setDecision] = useState<{ photo: PhotoSummary; value: 'APPROVED' | 'REJECTED' } | null>(null);
-  const [filter, setFilter] = useState<'ALL' | 'REVIEW' | 'DUPLICATE' | 'FAILED'>('ALL');
-  const [note, setNote] = useState(''); const [saving, setSaving] = useState(false);
-  const submit = async () => {
-    if (!decision || !note.trim()) return;
-    setSaving(true);
-    try {
-      const changed = await api.reviewPhoto(projectId, decision.photo.id, decision.value, note.trim());
-      onChanged(photos.map((item) => item.id === changed.id ? changed : item)); setDecision(null); setNote('');
-      void message.success('审核结果已保存');
-    } catch (cause) { void message.error(messageOf(cause)); } finally { setSaving(false); }
-  };
-  const columns: ColumnsType<PhotoSummary> = [
-    { title: '文件', dataIndex: 'originalFilename', ellipsis: true },
-    { title: '大小', dataIndex: 'byteSize', width: 110, render: formatBytes },
-    { title: '状态', dataIndex: 'status', width: 120, render: statusTag },
-    { title: '分析', dataIndex: 'analysisStatus', width: 130, render: (value, row) => <div className="table-primary">{statusTag(value)}{(row.failureMessage || row.analysisErrorMessage) && <small title={row.failureMessage || row.analysisErrorMessage || ''}>{row.failureMessage || row.analysisErrorMessage}</small>}</div> },
-    { title: '审核', dataIndex: 'reviewStatus', width: 120, render: statusTag },
-    { title: '重复', dataIndex: 'duplicateOf', width: 90, render: (value) => value ? <Tag color="warning">是</Tag> : '—' },
-    { title: '操作', width: 280, render: (_, row) => <Space>
-      <Button size="small" type="primary" disabled={row.analysisStatus !== 'SUCCEEDED'}
-        onClick={() => setDecision({ photo: row, value: 'APPROVED' })}>通过</Button>
-      <Button size="small" danger onClick={() => setDecision({ photo: row, value: 'REJECTED' })}>拒绝</Button>
-      <Popconfirm title="撤回照片并进入保留期？" onConfirm={() => void mutatePhoto(row, 'withdraw')}><Button size="small" disabled={!['AVAILABLE', 'DUPLICATE'].includes(row.status)}>撤回</Button></Popconfirm>
-      <Popconfirm title="永久删除照片及其对象？" description="该操作不可恢复。" onConfirm={() => void mutatePhoto(row, 'delete')}><Button size="small" danger>删除</Button></Popconfirm>
-    </Space> },
-  ];
-  const mutatePhoto = async (photo: PhotoSummary, action: 'withdraw' | 'delete') => {
-    try {
-      if (action === 'withdraw') {
-        const changed = await api.withdrawPhoto(projectId, photo.id);
-        onChanged(photos.map((item) => item.id === changed.id ? changed : item));
-      } else { await api.deletePhoto(projectId, photo.id); onChanged(photos.filter((item) => item.id !== photo.id)); }
-      void message.success(action === 'withdraw' ? '照片已撤回' : '照片已删除');
-    } catch (cause) { void message.error(messageOf(cause)); }
-  };
-  const visiblePhotos = photos.filter((photo) => filter === 'ALL' || filter === 'DUPLICATE' && !!photo.duplicateOf
-    || filter === 'FAILED' && (photo.status === 'FAILED' || photo.analysisStatus === 'FAILED')
-    || filter === 'REVIEW' && !['APPROVED', 'REJECTED'].includes(photo.reviewStatus));
-  return <Card title="照片审核"><Paragraph type="secondary">查看分析、重复检测和人工审核状态；审核原因会进入审计链路。</Paragraph>
-    <Segmented className="workflow-actions" value={filter} onChange={setFilter} options={[{ value: 'ALL', label: `全部 (${photos.length})` }, { value: 'REVIEW', label: '待审核' }, { value: 'DUPLICATE', label: '重复照片' }, { value: 'FAILED', label: '异常照片' }]} />
-    <Table rowKey="id" loading={loading} columns={columns} dataSource={visiblePhotos} pagination={{ pageSize: 15 }} />
-    <Modal title={decision?.value === 'APPROVED' ? '通过照片' : '拒绝照片'} open={!!decision} confirmLoading={saving}
-      okText="确认" onOk={() => void submit()} onCancel={() => { setDecision(null); setNote(''); }} okButtonProps={{ disabled: !note.trim() }}>
-      <Input.TextArea value={note} onChange={(event) => setNote(event.target.value)} rows={4} maxLength={500} showCount placeholder="请输入审核说明" />
-    </Modal>
-  </Card>;
-}
 
 export function TaskCenterPage({ api, projectId, jobs, loading, onChanged }: {
   api: OperationsApi; projectId: string; jobs: JobSummary[]; loading: boolean; onChanged: (jobs: JobSummary[]) => void;
@@ -72,7 +19,7 @@ export function TaskCenterPage({ api, projectId, jobs, loading, onChanged }: {
     } catch (cause) { void message.error(messageOf(cause)); }
   };
   const columns: ColumnsType<JobSummary> = [
-    { title: '类型', dataIndex: 'type', ellipsis: true }, { title: '状态', dataIndex: 'status', width: 150, render: statusTag },
+    { title: '类型', dataIndex: 'type', ellipsis: true, render: jobTypeLabel }, { title: '状态', dataIndex: 'status', width: 150, render: statusTag },
     { title: '进度', dataIndex: 'progress', width: 180, render: (value) => <Progress percent={value} size="small" /> },
     { title: '错误', dataIndex: 'errorMessage', ellipsis: true, render: (value) => value || '—' },
     { title: '操作', width: 170, render: (_, row) => <Space>
@@ -145,6 +92,6 @@ export function RenderDeliveryPage({ api, projectId, renders, layouts, loading, 
 
 function statusTag(value: string) { const color = value.includes('FAIL') || value.includes('REJECT') ? 'error'
   : value.includes('PENDING') || value.includes('RUNNING') || value.includes('PROCESS') ? 'processing'
-    : value.includes('SUCCEED') || value.includes('APPROVED') ? 'success' : 'default'; return <Tag color={color}>{value}</Tag>; }
+    : value.includes('SUCCEED') || value.includes('APPROVED') ? 'success' : 'default'; return <Tag color={color}>{statusLabel(value)}</Tag>; }
 function formatBytes(value: number) { return value < 1024 * 1024 ? `${(value / 1024).toFixed(1)} KB` : `${(value / 1024 / 1024).toFixed(1)} MB`; }
 function messageOf(cause: unknown) { return cause instanceof Error ? cause.message : '操作失败'; }

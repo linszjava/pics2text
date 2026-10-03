@@ -6,7 +6,7 @@ describe('viewport', () => {
     const next = zoomAt({ scale: 1, x: 10, y: 20 }, 110, 220, 2);
     expect(next).toEqual({ scale: 2, x: -90, y: -180 });
     expect(clampScale(0)).toBe(0.05);
-    expect(clampScale(99)).toBe(8);
+    expect(clampScale(99)).toBe(64);
   });
 
   it('fits the canvas and clips visible bounds', () => {

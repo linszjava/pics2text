@@ -1,192 +1,226 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AuditOutlined, ClockCircleOutlined, CloudUploadOutlined, DashboardOutlined, FileImageOutlined, FontSizeOutlined,
-  LogoutOutlined, MenuOutlined, ProjectOutlined, RocketOutlined, SafetyCertificateOutlined, TeamOutlined, UserOutlined } from '@ant-design/icons';
-import { Alert, Avatar, Button, Card, Col, Drawer, Empty, Flex, Layout, Menu, Progress, Row,
-  Select, Skeleton, Space, Statistic, Table, Tag, Typography } from 'antd';
-import type { ColumnsType } from 'antd/es/table';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { CloudUploadOutlined, DownOutlined, EditOutlined,
+  FontSizeOutlined, LogoutOutlined, ProjectOutlined, RocketOutlined,
+  UserOutlined } from '@ant-design/icons';
+import { Alert, App, Avatar, Button, Card, Dropdown, Empty, Flex, Layout,
+  Select, Skeleton, Typography } from 'antd';
 import { logout, type AuthenticatedUser } from './auth';
-import { OperationsApi, type JobSummary, type PhotoSummary, type ProjectSummary,
-  type RenderSummary } from './operationsApi';
+import { OperationsApi, type AutoLayoutSummary, type CreateAutoLayoutInput, type PhotoSummary, type ProjectSummary, type TextMaskSummary } from './operationsApi';
 import type { EditableLayout } from './types';
 import { ProjectManagement } from './ProjectManagement';
-import { UserManagement } from './UserManagement';
-import { AuditLogPage } from './AuditLogPage';
-import { PhotoReviewPage, RenderDeliveryPage, TaskCenterPage } from './WorkflowPages';
-import { ProjectMembersPage } from './ProjectMembersPage';
 import { LayoutWorkflowPage } from './LayoutWorkflowPage';
 import { PhotoUploadPage } from './PhotoUploadPage';
 
-const { Header, Sider, Content } = Layout;
-const { Text, Title } = Typography;
+const { Header, Content } = Layout;
+const { Text } = Typography;
 
 export function OperationsDashboard() {
+  const initialQuery = useMemo(() => new URLSearchParams(window.location.search), []);
+  const { modal } = App.useApp();
   const api = useMemo(() => new OperationsApi(), []);
   const [user, setUser] = useState<AuthenticatedUser | null>(null);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [projectId, setProjectId] = useState('');
   const [photos, setPhotos] = useState<PhotoSummary[]>([]);
-  const [jobs, setJobs] = useState<JobSummary[]>([]);
-  const [renders, setRenders] = useState<RenderSummary[]>([]);
   const [layouts, setLayouts] = useState<EditableLayout[]>([]);
+  const [masks, setMasks] = useState<TextMaskSummary[]>([]);
+  const [autoLayouts, setAutoLayouts] = useState<AutoLayoutSummary[]>([]);
+  const [preparing, setPreparing] = useState(false);
+  const [surfacePreparing, setSurfacePreparing] = useState(false);
+  const pendingRequest = useRef('');
+  const resumeSurface = useRef(initialQuery.get('step') === 'surface');
   const [loading, setLoading] = useState(true);
-  const [detailLoading, setDetailLoading] = useState(false);
   const [error, setError] = useState('');
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [section, setSection] = useState<'overview' | 'projects' | 'members' | 'design' | 'upload' | 'photos' | 'tasks' | 'renders' | 'users' | 'audit'>('overview');
+  const [section, setSection] = useState<'projects' | 'design' | 'upload' | 'editor' | 'surface'>(
+    initialQuery.get('step') === 'surface' ? 'editor' : 'projects');
 
   useEffect(() => {
     void Promise.all([api.me(), api.projects()]).then(([me, values]) => {
       setUser(me); setProjects(values);
-      setProjectId(values.find((item) => item.status === 'ACTIVE')?.id ?? values[0]?.id ?? '');
+      const requestedId = initialQuery.get('projectId');
+      setProjectId(values.find((item) => item.id === requestedId)?.id
+        ?? values.find((item) => item.status === 'ACTIVE')?.id ?? values[0]?.id ?? '');
     }).catch((cause: unknown) => setError(messageOf(cause))).finally(() => setLoading(false));
-  }, [api]);
+  }, [api, initialQuery]);
 
   const loadProject = useCallback(async (id: string) => {
-    if (!id) { setPhotos([]); setJobs([]); setRenders([]); setLayouts([]); return; }
-    setDetailLoading(true); setError('');
+    if (!id) { setPhotos([]); setLayouts([]); setMasks([]); setAutoLayouts([]); return; }
     try {
-      const values = await Promise.all([api.photos(id), api.jobs(id), api.renders(id), api.layouts(id)]);
-      setPhotos(values[0]); setJobs(values[1]); setRenders(values[2]); setLayouts(values[3]);
+      const [photoValues, layoutValues, maskValues, autoValues] = await Promise.all([
+        api.photos(id), api.layouts(id), api.textMasks(id), api.autoLayouts(id),
+      ]);
+      setPhotos(photoValues); setLayouts(layoutValues); setMasks(maskValues); setAutoLayouts(autoValues);
     } catch (cause) { setError(messageOf(cause)); }
-    finally { setDetailLoading(false); }
+    finally { /* 页面数据已完成刷新 */ }
   }, [api]);
 
   useEffect(() => { void loadProject(projectId); }, [loadProject, projectId]);
   useEffect(() => {
-    if (!projectId || !['overview', 'tasks'].includes(section)) return;
+    if (!projectId || !['upload', 'editor', 'surface'].includes(section)) return;
     const timer = window.setInterval(() => void loadProject(projectId), 10_000);
     return () => window.clearInterval(timer);
   }, [loadProject, projectId, section]);
   const project = projects.find((item) => item.id === projectId);
-  const sectionCopy = {
-    overview: ['工作概览', '集中查看项目、照片、任务与印刷交付状态'],
-    projects: ['项目与布局', '创建、归档项目并进入布局工作区'],
-    members: ['项目成员', '配置当前项目成员及其业务权限'],
-    design: ['文字与排版', '生成文字蒙版并启动照片自动排版'],
-    upload: ['照片上传', '批量直传照片并自动进入分析流水线'],
-    photos: ['照片审核', '处理照片分析、重复检测与人工审核'],
-    tasks: ['任务中心', '查看长任务进度、失败详情并执行重试'],
-    renders: ['渲染交付', '审批印刷成品并获取受控下载地址'],
-    users: ['用户与角色', '管理平台账号、全局角色和登录状态'],
-    audit: ['审计日志', '查询身份、权限及关键业务操作记录'],
-  }[section];
-  const pendingJobs = jobs.filter((item) => !['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(item.status)).length;
-  const reviewPhotos = photos.filter((item) => !['APPROVED', 'REJECTED'].includes(item.reviewStatus)).length;
-  const readyRenders = renders.filter((item) => ['READY_FOR_APPROVAL', 'APPROVED'].includes(item.status)).length;
+  const activeMask = masks.find((item) => item.id === project?.activeTextMaskId);
+  const maskAutoLayouts = autoLayouts.filter((item) => item.maskId === activeMask?.id);
+  const readyAutoLayout = maskAutoLayouts.find((item) => item.status === 'READY');
+  const selectedLayout = layouts.find((item) => item.sourceAutoLayoutId === readyAutoLayout?.id && item.maskId === activeMask?.id);
+  const usablePhotos = photos.filter((item) => item.status === 'AVAILABLE' && item.analysisStatus === 'SUCCEEDED');
+  const needsRematch = !!readyAutoLayout && usablePhotos.length > readyAutoLayout.candidateCount;
+  const prepareSurface = async () => {
+    if (!projectId || !selectedLayout || needsRematch || surfacePreparing) return;
+    setSurfacePreparing(true); setError('');
+    try {
+      const locked = selectedLayout.state === 'DRAFT'
+        ? (await api.lockEditableLayout(projectId, selectedLayout.id, selectedLayout.lockVersion)).layout
+        : selectedLayout;
+      if (locked.state === 'LOCKED') {
+        const templates = await api.surfaceTemplates(projectId);
+        const template = templates.find((item) => item.template.name === '演示火箭曲面')
+          ?? await api.createSurfaceTemplate(projectId);
+        await api.bindSurface(projectId, locked, template.template);
+        await api.createLayoutPreview(projectId, locked.id);
+      }
+      setLayouts((current) => current.map((item) => item.id === locked.id ? locked : item));
+      setSection('surface');
+    } catch (cause) { setError(messageOf(cause)); void loadProject(projectId); }
+    finally { setSurfacePreparing(false); }
+  };
+  useEffect(() => {
+    if (!resumeSurface.current || !selectedLayout) return;
+    resumeSurface.current = false;
+    void prepareSurface();
+  }, [selectedLayout]);
+  useEffect(() => {
+    if (!projectId || !activeMask || !['editor', 'surface'].includes(section) || preparing) return;
+    if (activeMask.status !== 'READY' || !usablePhotos.length) return;
+    const latestAutoLayout = maskAutoLayouts[0];
+    if (!latestAutoLayout || (needsRematch && !['PENDING', 'RUNNING', 'FAILED'].includes(latestAutoLayout.status))) {
+      const key = `auto:${projectId}:${activeMask.id}:${usablePhotos.length}`;
+      if (pendingRequest.current === key) return;
+      pendingRequest.current = key;
+      setPreparing(true);
+      const input: CreateAutoLayoutInput = {
+        name: `${activeMask.text}照片排版（${usablePhotos.length}张）`, maskId: activeMask.id, randomSeed: 20261002,
+        allowPhotoReuse: true, maxPhotoReuse: 10000, targetLabL: 128, targetLabA: 128, targetLabB: 128,
+        candidateWindow: 64, optimizationIterations: 1000,
+        weights: { quality: 1, brightness: 1, color: 1, crop: 1, duplicate: 1, adjacent: 1 },
+      };
+      void api.createAutoLayout(projectId, input).then(({ layout }) => {
+        setAutoLayouts((current) => current.some((item) => item.id === layout.id) ? current : [layout, ...current]);
+      }).catch((cause: unknown) => { setError(messageOf(cause)); pendingRequest.current = ''; })
+        .finally(() => setPreparing(false));
+      return;
+    }
+    if (readyAutoLayout && !selectedLayout) {
+      const key = `editable:${projectId}:${readyAutoLayout.id}`;
+      if (pendingRequest.current === key) return;
+      pendingRequest.current = key;
+      setPreparing(true);
+      void api.createEditableLayout(projectId, readyAutoLayout.id, `${readyAutoLayout.name}编辑稿`).then((layout) => {
+        setLayouts((current) => current.some((item) => item.id === layout.id) ? current : [layout, ...current]);
+      }).catch((cause: unknown) => { setError(messageOf(cause)); pendingRequest.current = ''; void loadProject(projectId); })
+        .finally(() => setPreparing(false));
+    }
+  }, [activeMask, api, loadProject, maskAutoLayouts, needsRematch, preparing, projectId, readyAutoLayout, section, selectedLayout, usablePhotos.length]);
   const menuItems = [
-    { key: 'overview', icon: <DashboardOutlined />, label: '工作概览' },
-    { key: 'projects', icon: <ProjectOutlined />, label: '项目与布局' },
-    { key: 'members', icon: <SafetyCertificateOutlined />, label: '项目成员' },
-    { key: 'design', icon: <FontSizeOutlined />, label: '文字与排版' },
-    { key: 'upload', icon: <CloudUploadOutlined />, label: '照片上传' },
-    { key: 'photos', icon: <FileImageOutlined />, label: '照片审核' },
-    { key: 'tasks', icon: <ClockCircleOutlined />, label: '任务中心' },
-    { key: 'renders', icon: <RocketOutlined />, label: '渲染交付' },
-    ...(user?.globalRole === 'ADMIN' ? [
-      { key: 'users', icon: <TeamOutlined />, label: '用户与角色' },
-      { key: 'audit', icon: <AuditOutlined />, label: '审计日志' },
-    ] : []),
+    { key: 'projects', icon: <ProjectOutlined />, label: '1. 创建项目' },
+    { key: 'design', icon: <FontSizeOutlined />, label: '2. 设置文字' },
+    { key: 'upload', icon: <CloudUploadOutlined />, label: '3. 上传照片' },
+    { key: 'editor', icon: <EditOutlined />, label: '4. 二维效果' },
+    { key: 'surface', icon: <RocketOutlined />, label: '5. 三维效果' },
   ];
-  const selectSection = (key: string) => { setSection(key as typeof section); setMobileMenuOpen(false); };
-
-  const jobColumns: ColumnsType<JobSummary> = [
-    { title: '任务类型', dataIndex: 'type', ellipsis: true },
-    { title: '状态', dataIndex: 'status', width: 140, render: (value: string) => <StatusTag value={value} /> },
-    { title: '进度', dataIndex: 'progress', width: 150,
-      render: (value: number) => <Progress percent={value} size="small" status={value === 100 ? 'success' : 'active'} /> },
-    { title: '尝试', width: 80, render: (_, row) => `${row.currentAttempt}/${row.maxAttempts}` },
-    { title: '更新时间', dataIndex: 'updatedAt', width: 180, render: formatTime },
-  ];
-  const layoutColumns: ColumnsType<EditableLayout> = [
-    { title: '布局', dataIndex: 'name', ellipsis: true },
-    { title: '状态', dataIndex: 'state', width: 120, render: (value: string) => <StatusTag value={value} /> },
-    { title: '版本', dataIndex: 'currentVersionNumber', width: 80 },
-    { title: '操作', width: 190, render: (_, row) => <Space>
-      <Button size="small" href={`?view=editor&projectId=${projectId}&layoutId=${row.id}`}>二维编辑</Button>
-      <Button size="small" href={`?view=surface&projectId=${projectId}&layoutId=${row.id}`}>三维预览</Button>
-    </Space> },
-  ];
+  const selectSection = (key: string) => key === 'surface' ? void prepareSurface() : setSection(key as typeof section);
 
   return <Layout className="ops-shell">
-    <Sider width={224} className="ops-sider">
-      <div className="ops-logo"><span>P2T</span><div><strong>Pics2Text</strong><small>运营工作台</small></div></div>
-      <Menu theme="dark" mode="inline" selectedKeys={[section]} onClick={({ key }) => selectSection(key)} items={menuItems} />
-      <div className="ops-sider-foot"><Text type="secondary">P10 · 前端运营流程</Text></div>
-    </Sider>
-    <Layout>
       <Header className="ops-header">
-        <Button className="ops-mobile-menu" type="text" icon={<MenuOutlined />} aria-label="打开导航" onClick={() => setMobileMenuOpen(true)} />
-        <div className="ops-heading"><Title level={4}>{sectionCopy[0]}</Title><Text type="secondary">{sectionCopy[1]}</Text></div>
-        <Space size="middle"><Avatar icon={<UserOutlined />} />
-          <div className="ops-user"><strong>{user?.displayName ?? '加载中'}</strong><small>{user?.globalRole}</small></div>
-          <Button icon={<LogoutOutlined />} onClick={() => void logout()}>退出</Button></Space>
+        <div className="ops-brand"><span>P2T</span><div><strong>Pics2Text</strong><small>照片文字创作</small></div></div>
+        <div className="ops-heading"><Text type="secondary">创作空间 / </Text><strong>{section === 'projects' ? '我的作品' : project?.name ?? '选择项目'}</strong></div>
+        <Dropdown trigger={['click']} menu={{ items: [{ key: 'logout', icon: <LogoutOutlined />, label: '退出登录' }],
+          onClick: () => modal.confirm({ title: '退出当前账号？', content: '确认后会返回登录页面。', okText: '退出登录', cancelText: '继续创作', onOk: () => logout() }) }}>
+          <Button className="ops-account" type="text" aria-label="账户菜单"><Avatar size="small" icon={<UserOutlined />} />
+            <span>{user?.displayName ?? '加载中'}</span><DownOutlined /></Button>
+        </Dropdown>
       </Header>
       <Content className="ops-content">
         {error && <Alert type="error" showIcon closable title={error} onClose={() => setError('')} />}
-        {!loading && !['projects', 'users', 'audit', 'overview'].includes(section) && <ProjectSwitcher
-          projectId={projectId} projects={projects} project={project} onChange={setProjectId} />}
+        {!loading && <nav className="workflow-rail" aria-label="创作步骤">
+          {menuItems.map((item, index) => {
+            const activeIndex = menuItems.findIndex((entry) => entry.key === section);
+            const state = index < activeIndex ? 'done' : index === activeIndex ? 'active' : '';
+            const disabled = index === 1 ? !projectId : index === 2 ? !activeMask
+              : index === 3 ? !activeMask || photos.length === 0
+              : index === 4 ? !selectedLayout || needsRematch : false;
+            return <button key={item.key} className={`workflow-rail-item ${state}`} disabled={disabled} onClick={() => selectSection(item.key)}>
+              <span className="workflow-rail-index">{index < activeIndex ? '✓' : index + 1}</span>
+              <span>{item.label.replace(/^\d+\.\s*/, '')}</span>
+            </button>;
+          })}
+        </nav>}
+        {!loading && section !== 'projects' && <ProjectSwitcher
+          projectId={projectId} projects={projects} onChange={setProjectId} />}
         {loading ? <Skeleton active /> : section === 'projects'
           ? <ProjectManagement api={api} projects={projects} loading={loading} onChanged={setProjects}
-              onOpen={(id) => { setProjectId(id); setSection('overview'); }} />
-          : section === 'photos'
-            ? <PhotoReviewPage api={api} projectId={projectId} photos={photos} loading={detailLoading} onChanged={setPhotos} />
+              onOpen={(id) => { setProjectId(id); setSection('design'); }} />
           : section === 'upload'
             ? <PhotoUploadPage api={api} projectId={projectId} photos={photos} onChanged={setPhotos} />
-          : section === 'members'
-            ? <ProjectMembersPage api={api} projectId={projectId} />
           : section === 'design'
-            ? <LayoutWorkflowPage api={api} projectId={projectId} />
-          : section === 'tasks'
-            ? <TaskCenterPage api={api} projectId={projectId} jobs={jobs} loading={detailLoading} onChanged={setJobs} />
-          : section === 'renders'
-            ? <RenderDeliveryPage api={api} projectId={projectId} renders={renders} layouts={layouts} loading={detailLoading} onChanged={setRenders} />
-          : section === 'users' && user?.globalRole === 'ADMIN'
-            ? <UserManagement api={api} currentUserId={user.id} />
-            : section === 'audit' && user?.globalRole === 'ADMIN'
-              ? <AuditLogPage api={api} />
-              : <>
-          <ProjectSwitcher projectId={projectId} projects={projects} project={project} onChange={setProjectId} />
-          {!projectId ? <Empty description="当前账号下暂无项目" /> : <>
-            <Row gutter={[16, 16]}>
-              <Col xs={24} sm={12} xl={6}><Card><Statistic title="照片总数" value={photos.length} prefix={<FileImageOutlined />} /></Card></Col>
-              <Col xs={24} sm={12} xl={6}><Card><Statistic title="待审核照片" value={reviewPhotos} /></Card></Col>
-              <Col xs={24} sm={12} xl={6}><Card><Statistic title="运行中任务" value={pendingJobs} /></Card></Col>
-              <Col xs={24} sm={12} xl={6}><Card><Statistic title="待交付成品" value={readyRenders} prefix={<RocketOutlined />} /></Card></Col>
-            </Row>
-            <Card className="ops-section" title="布局工作区" extra={<Text type="secondary">{layouts.length} 个布局</Text>}>
-              <Table rowKey="id" columns={layoutColumns} dataSource={layouts} loading={detailLoading}
-                pagination={{ pageSize: 5, hideOnSinglePage: true }} locale={{ emptyText: '暂无可编辑布局' }} />
-            </Card>
-            <Card className="ops-section" title="最近任务" extra={<Text type="secondary">自动刷新将在任务中心阶段接入</Text>}>
-              <Table rowKey="id" columns={jobColumns} dataSource={jobs} loading={detailLoading}
-                pagination={{ pageSize: 8, hideOnSinglePage: true }} locale={{ emptyText: '暂无任务记录' }} />
-            </Card>
-          </>}
-        </>}
+            ? <LayoutWorkflowPage api={api} projectId={projectId} activeTextMaskId={project?.activeTextMaskId ?? null}
+                onProjectChanged={(changed) => { setProjects((current) => current.map((item) => item.id === changed.id ? changed : item)); void loadProject(changed.id); }}
+                onNext={() => setSection('upload')} />
+          : <PreviewStep projectId={projectId} layout={needsRematch ? undefined : selectedLayout} mode={section} photos={photos.length}
+              mask={activeMask} autoLayout={maskAutoLayouts[0]} preparing={preparing || surfacePreparing} photosReady={usablePhotos.length}
+              needsRematch={needsRematch}
+              onBack={() => setSection(section === 'surface' ? 'editor' : !activeMask ? 'design' : 'upload')}
+              onNext={() => void prepareSurface()} />}
       </Content>
-    </Layout>
-    <Drawer className="ops-mobile-drawer" title="Pics2Text" placement="left" size={270} open={mobileMenuOpen} onClose={() => setMobileMenuOpen(false)}>
-      <Menu mode="inline" selectedKeys={[section]} items={menuItems} onClick={({ key }) => selectSection(key)} />
-    </Drawer>
   </Layout>;
 }
 
-function ProjectSwitcher({ projectId, projects, project, onChange }: { projectId: string; projects: ProjectSummary[]; project?: ProjectSummary; onChange: (id: string) => void }) {
-  return <Flex className="ops-project-switcher" align="center" justify="space-between" gap={16} wrap>
-    <div><Text type="secondary">当前项目</Text><Title level={3}>{project?.name ?? '暂无项目'}</Title></div>
-    <Select value={projectId || undefined} placeholder="选择项目" style={{ minWidth: 280 }}
+function PreviewStep({ projectId, layout, mask, autoLayout, mode, photos, photosReady, needsRematch, preparing, onBack, onNext }: {
+  projectId: string; layout?: EditableLayout; mask?: TextMaskSummary; autoLayout?: AutoLayoutSummary;
+  mode: 'editor' | 'surface'; photos: number; photosReady: number; needsRematch: boolean; preparing: boolean;
+  onBack: () => void; onNext: () => void;
+}) {
+  if (!projectId) return <Card><Empty description="请先创建项目" /></Card>;
+  const is3d = mode === 'surface';
+  const pendingMessage = !mask ? '请先在第二步保存文字与排版方案。'
+    : mask.status !== 'READY' ? '文字方案正在生成，请稍候。'
+    : photos === 0 ? '请先上传照片。'
+    : photosReady === 0 ? '照片正在处理，完成后会自动填入文字。'
+    : needsRematch ? `已有 ${photosReady} 张照片分析完成，正在重新匹配全部照片；原排版会保留。`
+    : autoLayout?.status === 'FAILED' ? '照片排版生成失败，请检查照片并重试。'
+    : preparing || !autoLayout ? '正在按已保存的方案生成照片排版。'
+    : autoLayout.status !== 'READY' ? '正在将照片填入文字，请稍候。'
+    : '正在准备可编辑的预览。';
+  return <section className="result-workspace">
+    <div className="result-heading"><span className="section-kicker">{is3d ? '成品预览 / 05' : '照片排版 / 04'}</span>
+      <h2>{is3d ? '让作品贴上火箭。' : '看见照片组成的文字。'}</h2>
+      <p>{is3d ? '旋转查看照片墙贴合箭体的效果。' : '检查每张照片的位置，再决定是否进入三维预览。'}</p></div>
+    <div className="result-panel"><div className={`result-art ${is3d ? 'rocket' : 'mosaic'}`} aria-hidden="true">
+      <div className="result-orbit" />{is3d ? <RocketOutlined /> : <div className="result-pixels">{Array.from({ length: 56 }, (_, index) => <i key={index} />)}</div>}
+      <span>{is3d ? '三维曲面预览' : '二维照片布局'}</span></div>
+      <div className="result-content"><span className="section-kicker">{layout ? '当前作品' : '创作进行中'}</span>
+        <h3>{layout?.name ?? (autoLayout?.status === 'FAILED' ? '照片排版生成失败'
+          : photosReady > 0 ? '正在准备可预览的二维排版' : '还没有可预览的照片布局')}</h3>
+        <p>{layout ? `已上传 ${photos} 张照片，其中 ${photosReady} 张完成分析；当前排版使用 ${autoLayout?.candidateCount ?? photosReady} 张。点击下方按钮打开实际${is3d ? '三维' : '二维'}效果。`
+          : pendingMessage}</p>
+        {layout ? <div className="result-actions"><Button size="large" type="primary"
+          href={`?view=${is3d ? 'surface' : 'editor'}&projectId=${projectId}&layoutId=${layout.id}`}>
+          打开{is3d ? '三维效果' : '二维效果'}
+          </Button>{!is3d && <Button size="large" loading={preparing} onClick={onNext}>继续查看三维效果</Button>}</div>
+          : <Button size="large" type="primary" onClick={onBack}>{is3d ? '返回二维效果' : !mask ? '返回设置文字' : '返回上传照片'}</Button>}</div>
+    </div>
+  </section>;
+}
+
+function ProjectSwitcher({ projectId, projects, onChange }: { projectId: string; projects: ProjectSummary[]; onChange: (id: string) => void }) {
+  return <Flex className="ops-project-switcher" align="center" gap={12} wrap>
+    <Text type="secondary">当前项目</Text>
+    <Select value={projectId || undefined} placeholder="选择项目" style={{ minWidth: 220 }}
       options={projects.map((item) => ({ value: item.id, label: `${item.name}${item.status === 'ARCHIVED' ? '（已归档）' : ''}` }))}
       onChange={onChange} />
   </Flex>;
 }
 
-function StatusTag({ value }: { value: string }) {
-  const color = value.includes('FAIL') || value.includes('REJECT') || value === 'INVALID' ? 'error'
-    : value.includes('RUN') || value.includes('PROCESS') || value.includes('PENDING') ? 'processing'
-      : value.includes('SUCCEED') || value.includes('APPROVED') || value === 'PUBLISHED' || value === 'ACTIVE' ? 'success'
-        : 'default';
-  return <Tag color={color}>{value}</Tag>;
-}
-
-function formatTime(value: string) { return value ? new Date(value).toLocaleString('zh-CN') : '—'; }
 function messageOf(cause: unknown) { return cause instanceof Error ? cause.message : '加载失败'; }

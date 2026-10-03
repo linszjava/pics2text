@@ -18,7 +18,6 @@ import com.pics2text.photoasset.infrastructure.persistence.PhotoAnalysisEntity;
 import com.pics2text.photoasset.infrastructure.persistence.PhotoAnalysisMapper;
 import com.pics2text.photoasset.infrastructure.persistence.PhotoVariantEntity;
 import com.pics2text.project.domain.ProjectPermission;
-import com.pics2text.project.domain.ProjectRole;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.HashSet;
@@ -51,11 +50,13 @@ public class PhotoAssetService {
     private final JobCoordinator jobs;
     private final ObjectMapper objectMapper;
     private final PhotoAnalysisMapper analysisMapper;
+    private final PhotoObjectDeletionService deletionService;
 
     public PhotoAssetService(PhotoAssetMapper mapper, ProjectAccessService access,
             ObjectStorageGateway storage, ObjectStorageProperties properties,
             ObjectKeyPolicy keyPolicy, PhotoObjectVerifier verifier, AuditService audit,
-            JobCoordinator jobs, ObjectMapper objectMapper, PhotoAnalysisMapper analysisMapper) {
+            JobCoordinator jobs, ObjectMapper objectMapper, PhotoAnalysisMapper analysisMapper,
+            PhotoObjectDeletionService deletionService) {
         this.mapper = mapper;
         this.access = access;
         this.storage = storage;
@@ -66,6 +67,7 @@ public class PhotoAssetService {
         this.jobs = jobs;
         this.objectMapper = objectMapper;
         this.analysisMapper = analysisMapper;
+        this.deletionService = deletionService;
     }
 
     @Transactional
@@ -227,6 +229,25 @@ public class PhotoAssetService {
         return require(projectId, photoId);
     }
 
+    @Transactional
+    public PhotoAssetEntity rename(UUID projectId, UUID photoId, String filename) {
+        User actor = access.require(projectId, ProjectPermission.MANAGE_PHOTOS);
+        PhotoAssetEntity asset = require(projectId, photoId);
+        if (!PhotoAssetStatus.AVAILABLE.name().equals(asset.getStatus())) {
+            throw conflict("PHOTO_NOT_AVAILABLE", "仅可重命名可用照片");
+        }
+        String normalized = filename == null ? "" : filename.trim();
+        if (normalized.isBlank() || normalized.length() > 255
+                || normalized.chars().anyMatch(c -> c == '/' || c == '\\' || Character.isISOControl(c))) {
+            throw bad("PHOTO_FILENAME_INVALID", "照片名称不能为空、超过255个字符或包含路径字符");
+        }
+        asset.setOriginalFilename(normalized);
+        asset.setUpdatedAt(Instant.now());
+        mapper.updateById(asset);
+        audit.record(actor.id(), "PHOTO_RENAME", "PHOTO_ASSET", photoId.toString(), true);
+        return asset;
+    }
+
     public AnalysisResult analysis(UUID projectId, UUID photoId) {
         access.require(projectId, ProjectPermission.VIEW);
         require(projectId, photoId);
@@ -237,26 +258,6 @@ public class PhotoAssetService {
         return new AnalysisResult(result, analysisMapper.listVariants(photoId));
     }
 
-    @Transactional
-    public PhotoAssetEntity review(UUID projectId, UUID photoId, ReviewStatus decision, String note) {
-        User actor = access.require(projectId, ProjectPermission.REVIEW_PHOTOS);
-        if (decision == null || decision == ReviewStatus.PENDING) {
-            throw bad("PHOTO_REVIEW_DECISION_INVALID", "人工审核只能选择通过或拒绝");
-        }
-        String normalizedNote = note == null ? "" : note.trim();
-        if (normalizedNote.isBlank() || normalizedNote.length() > 500) {
-            throw bad("PHOTO_REVIEW_NOTE_INVALID", "审核说明不能为空且不能超过500个字符");
-        }
-        require(projectId, photoId);
-        if (analysisMapper.manualReview(projectId, photoId, decision.name(), actor.id(),
-                normalizedNote, Instant.now()) == 0) {
-            throw conflict("PHOTO_REVIEW_STATE_INVALID", "仅可审核已完成分析的可用照片");
-        }
-        audit.record(actor.id(), "PHOTO_MANUAL_REVIEW_" + decision.name(),
-                "PHOTO_ASSET", photoId.toString(), true);
-        return require(projectId, photoId);
-    }
-
     public ObjectStorageGateway.PresignedRequest download(UUID projectId, UUID photoId) {
         access.require(projectId, ProjectPermission.VIEW);
         PhotoAssetEntity asset = require(projectId, photoId);
@@ -264,6 +265,31 @@ public class PhotoAssetService {
             throw conflict("PHOTO_NOT_AVAILABLE", "照片当前不可下载");
         }
         return storage.presignGet(asset.getOriginalKey(), asset.getOriginalFilename());
+    }
+
+    public PhotoPreview preview(UUID projectId, UUID photoId) {
+        access.require(projectId, ProjectPermission.VIEW);
+        PhotoAssetEntity asset = require(projectId, photoId);
+        if (!PhotoAssetStatus.AVAILABLE.name().equals(asset.getStatus())) {
+            throw conflict("PHOTO_NOT_AVAILABLE", "照片当前不可预览");
+        }
+        boolean analysisReady = AnalysisStatus.SUCCEEDED.name().equals(asset.getAnalysisStatus());
+        String thumbnailKey = analysisReady
+                ? firstPresent(asset.getThumbnailKey(), asset.getPreviewKey(), asset.getSourceKey(), asset.getOriginalKey())
+                : asset.getOriginalKey();
+        String previewKey = analysisReady
+                ? firstPresent(asset.getPreviewKey(), asset.getSourceKey(), asset.getOriginalKey())
+                : asset.getOriginalKey();
+        return new PhotoPreview(
+                storage.presignGet(thumbnailKey, "photo-thumbnail.webp"),
+                storage.presignGet(previewKey, asset.getOriginalFilename()));
+    }
+
+    private String firstPresent(String... values) {
+        for (String value : values) {
+            if (value != null && !value.isBlank()) return value;
+        }
+        throw conflict("PHOTO_PREVIEW_NOT_READY", "照片预览尚未生成");
     }
 
     @Transactional
@@ -360,11 +386,7 @@ public class PhotoAssetService {
     }
 
     private void ensureUploadOwnerOrAdministrator(PhotoAssetEntity asset, User actor) {
-        if (asset.getUploaderId().equals(actor.id()) || actor.administrator()) return;
-        var membership = access.membership(asset.getProjectId(), actor.id());
-        if (membership == null || !ProjectRole.valueOf(membership.getRole()).allows(ProjectPermission.MANAGE_PROJECT)) {
-            throw new ApiException("UPLOAD_ACCESS_DENIED", "只能操作本人创建的上传会话", HttpStatus.FORBIDDEN);
-        }
+        // 单用户创作模式只要求已登录，不再区分上传者、角色或项目权限。
     }
 
     private void fail(PhotoAssetEntity asset, String code, String message, boolean deleteObject) {
@@ -379,18 +401,7 @@ public class PhotoAssetService {
     }
 
     private void cleanupStorage(PhotoAssetEntity asset) {
-        if (asset.getMultipartUploadId() != null && PhotoAssetStatus.UPLOADING.name().equals(asset.getStatus())) {
-            storage.abortMultipart(asset.getOriginalKey(), asset.getMultipartUploadId());
-        } else {
-            storage.delete(asset.getOriginalKey());
-        }
-        if (asset.getSourceKey() != null && !asset.getSourceKey().equals(asset.getOriginalKey())) {
-            storage.delete(asset.getSourceKey());
-        }
-        storage.delete(asset.getThumbnailKey());
-        storage.delete(asset.getPreviewKey());
-        analysisMapper.listVariants(asset.getId()).stream()
-                .map(PhotoVariantEntity::objectKey).distinct().forEach(storage::delete);
+        deletionService.deleteAll(asset);
     }
 
     private ApiException bad(String code, String message) { return new ApiException(code, message, HttpStatus.BAD_REQUEST); }
@@ -401,4 +412,6 @@ public class PhotoAssetService {
     public record UploadProgress(String status, long uploadedBytes, long totalBytes,
             int uploadedParts, int totalParts, String failureCode, String failureMessage) {}
     public record AnalysisResult(PhotoAnalysisEntity analysis, List<PhotoVariantEntity> variants) {}
+    public record PhotoPreview(ObjectStorageGateway.PresignedRequest thumbnail,
+            ObjectStorageGateway.PresignedRequest preview) {}
 }

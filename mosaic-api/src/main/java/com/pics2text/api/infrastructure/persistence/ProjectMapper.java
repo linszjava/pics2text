@@ -9,12 +9,6 @@ import org.apache.ibatis.annotations.Select;
 
 @Mapper
 public interface ProjectMapper extends BaseMapper<ProjectEntity> {
-    @Select("""
-            SELECT p.* FROM mosaic_project p
-            WHERE #{administrator} OR EXISTS (
-              SELECT 1 FROM project_member pm WHERE pm.project_id = p.id AND pm.user_id = #{userId}
-            )
-            ORDER BY p.created_at DESC
-            """)
-    List<ProjectEntity> listVisible(@Param("userId") UUID userId, @Param("administrator") boolean administrator);
+    @Select("SELECT * FROM mosaic_project WHERE created_by = #{creatorId} ORDER BY created_at DESC")
+    List<ProjectEntity> listByCreator(@Param("creatorId") UUID creatorId);
 }

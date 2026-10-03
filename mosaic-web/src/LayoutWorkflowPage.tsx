@@ -1,128 +1,135 @@
 import { useEffect, useState } from 'react';
-import { PlusOutlined, ReloadOutlined } from '@ant-design/icons';
-import { App, Button, Card, Checkbox, Col, Empty, Form, Input, InputNumber, Modal, Row, Select, Space, Table, Tabs, Tag, Typography } from 'antd';
-import type { ColumnsType } from 'antd/es/table';
-import { OperationsApi, type AutoLayoutSummary, type CreateAutoLayoutInput, type CreateTextMaskInput, type FontAsset, type TextMaskSummary } from './operationsApi';
+import { ArrowRightOutlined, DeleteOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
+import { App, Button, Card, Col, Empty, Form, Input, InputNumber, Modal, Popconfirm, Row, Select, Space, Typography } from 'antd';
+import { OperationsApi, type CreateTextMaskInput, type FontAsset, type ProjectSummary, type TextMaskSummary } from './operationsApi';
+import { statusLabel } from './uiLabels';
 
-export function LayoutWorkflowPage({ api, projectId }: { api: OperationsApi; projectId: string }) {
+type MaskFormValues = { name: string; text: string; direction: 'HORIZONTAL' | 'VERTICAL'; fontId: string; targetSlotCount: number };
+
+export function LayoutWorkflowPage({ api, projectId, activeTextMaskId, onProjectChanged, onNext }: {
+  api: OperationsApi; projectId: string; activeTextMaskId: string | null;
+  onProjectChanged: (project: ProjectSummary) => void; onNext: () => void;
+}) {
   const { message } = App.useApp();
   const [fonts, setFonts] = useState<FontAsset[]>([]);
   const [masks, setMasks] = useState<TextMaskSummary[]>([]);
-  const [layouts, setLayouts] = useState<AutoLayoutSummary[]>([]);
+  const [selectedMaskId, setSelectedMaskId] = useState('');
   const [loading, setLoading] = useState(false);
-  const [maskOpen, setMaskOpen] = useState(false);
-  const [layoutOpen, setLayoutOpen] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [maskForm] = Form.useForm<CreateTextMaskInput>();
-  const [layoutForm] = Form.useForm<CreateAutoLayoutInput>();
+  const [maskOpen, setMaskOpen] = useState(false);
+  const [form] = Form.useForm<MaskFormValues>();
 
   const load = () => {
     if (!projectId) return;
     setLoading(true);
-    void Promise.all([api.fonts(), api.textMasks(projectId), api.autoLayouts(projectId)]).then(([fontValues, maskValues, layoutValues]) => {
-      setFonts(fontValues); setMasks(maskValues); setLayouts(layoutValues);
+    void Promise.all([api.fonts(), api.textMasks(projectId)]).then(([fontValues, maskValues]) => {
+      setFonts(fontValues); setMasks(maskValues);
     }).catch((cause: unknown) => void message.error(messageOf(cause))).finally(() => setLoading(false));
   };
   useEffect(load, [api, message, projectId]);
+  useEffect(() => setSelectedMaskId(activeTextMaskId ?? ''), [projectId, activeTextMaskId]);
 
-  const createMask = async (values: CreateTextMaskInput) => {
+  const createMask = async (values: MaskFormValues) => {
     setSaving(true);
     try {
-      const created = await api.createTextMask(projectId, values);
-      setMasks((current) => [created.mask, ...current]); setMaskOpen(false); maskForm.resetFields();
-      void message.success(`文字蒙版任务已创建：${created.jobId.slice(0, 8)}`);
+      const fontSize = 256;
+      const gap = 1;
+      const cellSize = cellSizeForTarget(values.text, fontSize, gap, values.targetSlotCount);
+      const input: CreateTextMaskInput = {
+        name: values.name.trim(), text: values.text.trim(), direction: values.direction, fontId: values.fontId,
+        fontSize, fontWeight: 700, letterSpacing: 0, lineSpacing: 1.2,
+        canvasWidth: values.direction === 'VERTICAL' ? 1024 : 2048,
+        canvasHeight: values.direction === 'VERTICAL' ? 2048 : 1024,
+        padding: 80, gridStrategy: 'REGULAR', edgePolicy: 'INCLUDE_PARTIAL',
+        cellWidth: cellSize, cellHeight: cellSize, gap, coverageThreshold: 0.5,
+      };
+      const created = await api.createTextMask(projectId, input);
+      setMasks((current) => [created.mask, ...current]);
+      setSelectedMaskId(created.mask.id);
+      setMaskOpen(false); form.resetFields();
+      void message.success('文字方案已创建。确认选中后保存，即可进入上传照片。');
     } catch (cause) { void message.error(messageOf(cause)); }
     finally { setSaving(false); }
   };
-  const createLayout = async (values: CreateAutoLayoutInput) => {
+  const saveAndNext = async () => {
+    if (!selectedMaskId || !masks.some((mask) => mask.id === selectedMaskId)) return;
     setSaving(true);
     try {
-      const created = await api.createAutoLayout(projectId, values);
-      setLayouts((current) => [created.layout, ...current]); setLayoutOpen(false); layoutForm.resetFields();
-      void message.success(`自动排版任务已创建：${created.jobId.slice(0, 8)}`);
+      const changed = await api.selectTextMask(projectId, selectedMaskId);
+      onProjectChanged(changed);
+      void message.success('文字与排版方案已保存');
+      onNext();
     } catch (cause) { void message.error(messageOf(cause)); }
     finally { setSaving(false); }
   };
-  const readyMasks = masks.filter((item) => item.status === 'READY');
-  const maskColumns: ColumnsType<TextMaskSummary> = [
-    { title: '蒙版', render: (_, row) => <div className="table-primary"><strong>{row.name}</strong><small>{row.text}</small></div> },
-    { title: '方向', dataIndex: 'direction', width: 100, render: (value) => value === 'VERTICAL' ? '纵向' : '横向' },
-    { title: '画布', width: 120, render: (_, row) => `${row.canvasWidth} × ${row.canvasHeight}` },
-    { title: '槽位', dataIndex: 'slotCount', width: 90 },
-    { title: '状态', dataIndex: 'status', width: 120, render: (value) => <StatusTag value={value} /> },
-    { title: '创建时间', dataIndex: 'createdAt', width: 190, render: formatTime },
-  ];
-  const layoutColumns: ColumnsType<AutoLayoutSummary> = [
-    { title: '自动布局', dataIndex: 'name', ellipsis: true },
-    { title: '状态', dataIndex: 'status', width: 120, render: (value) => <StatusTag value={value} /> },
-    { title: '已分配/槽位', width: 130, render: (_, row) => `${row.assignedCount}/${row.slotCount}` },
-    { title: '唯一照片', dataIndex: 'uniquePhotoCount', width: 100, render: (value) => value ?? '—' },
-    { title: '耗时', dataIndex: 'runtimeMillis', width: 100, render: (value) => value == null ? '—' : `${value} ms` },
-    { title: '创建时间', dataIndex: 'createdAt', width: 190, render: formatTime },
-  ];
-
-  if (!projectId) return <Card><Empty description="请先选择项目" /></Card>;
+  const deleteMask = async (mask: TextMaskSummary) => {
+    try {
+      await api.deleteTextMask(projectId, mask.id);
+      setMasks((current) => current.filter((item) => item.id !== mask.id));
+      if (selectedMaskId === mask.id) setSelectedMaskId('');
+      if (activeTextMaskId === mask.id) {
+        const refreshed = await api.projects();
+        const project = refreshed.find((item) => item.id === projectId);
+        if (project) onProjectChanged(project);
+      }
+      void message.success('文字方案已删除');
+    } catch (cause) { void message.error(messageOf(cause)); }
+  };
+  const selectedMask = masks.find((mask) => mask.id === selectedMaskId);
+  if (!projectId) return <Card><Empty description="请先创建项目" /></Card>;
   return <>
-    <Card title="文字蒙版与自动排版" extra={<Button icon={<ReloadOutlined />} loading={loading} onClick={load}>刷新状态</Button>}>
-      <Typography.Paragraph type="secondary">先把文字栅格化为照片槽位，蒙版就绪后再启动照片匹配和自动排版。任务执行状态也会同步到任务中心。</Typography.Paragraph>
-      <Tabs items={[
-        { key: 'masks', label: `文字蒙版 (${masks.length})`, children: <>
-          <Space className="workflow-actions"><Button type="primary" icon={<PlusOutlined />} onClick={() => setMaskOpen(true)}>新建文字蒙版</Button></Space>
-          <Table rowKey="id" loading={loading} columns={maskColumns} dataSource={masks} pagination={{ pageSize: 8, hideOnSinglePage: true }} />
-        </> },
-        { key: 'layouts', label: `自动排版 (${layouts.length})`, children: <>
-          <Space className="workflow-actions"><Button type="primary" icon={<PlusOutlined />} disabled={!readyMasks.length} onClick={() => setLayoutOpen(true)}>新建自动排版</Button>
-            {!readyMasks.length && <Typography.Text type="secondary">需要至少一个已就绪蒙版</Typography.Text>}</Space>
-          <Table rowKey="id" loading={loading} columns={layoutColumns} dataSource={layouts} pagination={{ pageSize: 8, hideOnSinglePage: true }} />
-        </> },
-      ]} />
-    </Card>
-    <MaskModal open={maskOpen} saving={saving} fonts={fonts} form={maskForm} onCancel={() => setMaskOpen(false)} onFinish={createMask} />
-    <LayoutModal open={layoutOpen} saving={saving} masks={readyMasks} form={layoutForm} onCancel={() => setLayoutOpen(false)} onFinish={createLayout} />
+    <div className="design-heading"><div><Typography.Text className="section-kicker">02 / 05 · 文字设计</Typography.Text>
+      <Typography.Title level={2}>让文字成为作品的轮廓</Typography.Title>
+      <Typography.Paragraph>输入文字并选择一个方案。保存后，下一步上传照片。</Typography.Paragraph></div>
+      <Space><Button icon={<ReloadOutlined />} loading={loading} onClick={load}>刷新</Button>
+        <Button icon={<PlusOutlined />} onClick={() => { form.setFieldsValue({ fontId: fonts[0]?.id }); setMaskOpen(true); }}>新建方案</Button></Space></div>
+    {selectedMask ? <section className="design-studio" aria-label="当前选择的文字方案">
+      <div className="design-stage"><span className="design-stage-label">文字排版示意</span>
+        <div className={`design-stage-text ${selectedMask.direction === 'VERTICAL' ? 'vertical' : ''}`}>
+          {Array.from(selectedMask.text).map((character, index) => <span key={`${character}-${index}`}>{character}</span>)}
+        </div>
+        <span className="design-stage-foot">{selectedMask.direction === 'VERTICAL' ? '竖向' : '横向'} · {selectedMask.slotCount.toLocaleString('zh-CN')} 个照片位置</span>
+      </div>
+      <div className="design-inspector"><div><Typography.Text className="section-kicker">已选方案</Typography.Text>
+        <Typography.Title level={3}>{selectedMask.name}</Typography.Title><Typography.Text type="secondary">{statusLabel(selectedMask.status)}</Typography.Text></div>
+        <div className="design-specs"><div><span>文字内容</span><strong>{selectedMask.text}</strong></div>
+          <div><span>排列方向</span><strong>{selectedMask.direction === 'VERTICAL' ? '竖向' : '横向'}</strong></div>
+          <div><span>照片位置</span><strong>{selectedMask.slotCount.toLocaleString('zh-CN')} 个</strong></div></div>
+        <div className="design-inspector-actions"><Button type="primary" size="large" block loading={saving} onClick={() => void saveAndNext()}>
+          保存并上传照片 <ArrowRightOutlined /></Button>
+          <Typography.Text type="secondary">{activeTextMaskId === selectedMask.id ? '该方案已保存到当前项目' : '尚未保存到当前项目'}</Typography.Text></div>
+      </div>
+    </section> : <div className="design-empty"><Typography.Title level={3}>先选择一个文字方案</Typography.Title>
+      <Typography.Paragraph>没有选中方案时，不能进入下一步。</Typography.Paragraph>
+      <Button type="primary" icon={<PlusOutlined />} onClick={() => { form.setFieldsValue({ fontId: fonts[0]?.id }); setMaskOpen(true); }}>新建文字方案</Button></div>}
+    {masks.length > 0 && <><div className="creation-section-heading"><div><Typography.Title level={4}>文字方案</Typography.Title>
+      <Typography.Text type="secondary">一次只能选中一个，保存后会用于二维和三维效果</Typography.Text></div><span>{masks.length} 个</span></div>
+      <div className="design-variant-list">{masks.map((mask) => <div className={`design-variant ${selectedMaskId === mask.id ? 'selected' : ''}`} key={mask.id}>
+        <button className="design-variant-select" onClick={() => setSelectedMaskId(mask.id)} aria-label={`选择${mask.name}`} aria-pressed={selectedMaskId === mask.id}>
+          <span className={`design-variant-thumbnail ${mask.direction === 'VERTICAL' ? 'vertical' : ''}`}>{mask.text}</span>
+          <span className="design-variant-copy"><strong>{mask.name}</strong><small>{mask.slotCount.toLocaleString('zh-CN')} 个位置 · {mask.direction === 'VERTICAL' ? '竖排' : '横排'}</small></span>
+          {selectedMaskId === mask.id && <span className="design-selected-badge">已选中</span>}
+        </button>
+        <Popconfirm title="删除这个文字方案？" description="相关的旧排版结果也会一起删除。" okText="删除" cancelText="取消" okButtonProps={{ danger: true }}
+          onConfirm={() => void deleteMask(mask)}><Button className="card-delete-button" type="text" shape="circle" danger icon={<DeleteOutlined />} title="删除文字方案" /></Popconfirm>
+      </div>)}</div></>}
+    <Modal title="新建文字方案" open={maskOpen} confirmLoading={saving} okText="创建方案" cancelText="取消"
+      onOk={() => form.submit()} onCancel={() => setMaskOpen(false)} destroyOnHidden>
+      <Form form={form} layout="vertical" initialValues={{ name: '中国人能飞标准竖排', text: '中国人能飞', direction: 'VERTICAL', targetSlotCount: 2000 }}
+        onFinish={(values) => void createMask(values)}>
+        <Form.Item name="text" label="文字内容" rules={[{ required: true, message: '请输入文字' }, { max: 400 }]}><Input /></Form.Item>
+        <Form.Item name="name" label="方案名称" rules={[{ required: true, message: '请输入方案名称' }, { max: 120 }]}><Input /></Form.Item>
+        <Row gutter={16}><Col span={12}><Form.Item name="direction" label="排列方向" rules={[{ required: true }]}><Select options={[{ value: 'VERTICAL', label: '竖向' }, { value: 'HORIZONTAL', label: '横向' }]} /></Form.Item></Col>
+          <Col span={12}><Form.Item name="fontId" label="字体" rules={[{ required: true, message: '请选择字体' }]}><Select options={fonts.map((font) => ({ value: font.id, label: font.family }))} /></Form.Item></Col></Row>
+        <Form.Item name="targetSlotCount" label="目标照片位置数" rules={[{ required: true }]}><InputNumber min={100} max={10000} step={100} style={{ width: '100%' }} /></Form.Item>
+        <Typography.Text type="secondary">推荐约 2000 个，可在创建前自行调整。</Typography.Text>
+      </Form>
+    </Modal>
   </>;
 }
 
-function MaskModal({ open, saving, fonts, form, onCancel, onFinish }: { open: boolean; saving: boolean; fonts: FontAsset[]; form: ReturnType<typeof Form.useForm<CreateTextMaskInput>>[0]; onCancel: () => void; onFinish: (values: CreateTextMaskInput) => void }) {
-  const initial = { name: '中国人能飞', text: '中国人能飞', direction: 'HORIZONTAL', fontId: fonts[0]?.id, fontSize: 256, fontWeight: 700, letterSpacing: 0, lineSpacing: 1.2, canvasWidth: 2048, canvasHeight: 1024, padding: 80, gridStrategy: 'REGULAR', edgePolicy: 'STRICT', cellWidth: 48, cellHeight: 48, gap: 2, coverageThreshold: 0.6 };
-  return <Modal width={760} title="新建文字蒙版" open={open} confirmLoading={saving} okText="创建并生成" cancelText="取消" onOk={() => form.submit()} onCancel={onCancel} destroyOnHidden>
-    <Form form={form} layout="vertical" initialValues={initial} onFinish={onFinish}>
-      <Row gutter={16}><Col span={12}><Form.Item name="name" label="蒙版名称" rules={[{ required: true }, { max: 120 }]}><Input /></Form.Item></Col>
-        <Col span={12}><Form.Item name="text" label="文字内容" rules={[{ required: true }, { max: 400 }]}><Input /></Form.Item></Col></Row>
-      <Row gutter={16}><Col span={8}><Form.Item name="direction" label="排版方向"><Select options={[{ value: 'HORIZONTAL', label: '横向' }, { value: 'VERTICAL', label: '纵向' }]} /></Form.Item></Col>
-        <Col span={10}><Form.Item name="fontId" label="字体" rules={[{ required: true }]}><Select options={fonts.map((font) => ({ value: font.id, label: `${font.family} ${font.version}` }))} /></Form.Item></Col>
-        <Col span={6}><NumberItem name="fontWeight" label="字重" min={100} max={900} /></Col></Row>
-      <Row gutter={16}><Col span={6}><NumberItem name="fontSize" label="字号" min={16} max={2048} /></Col><Col span={6}><NumberItem name="letterSpacing" label="字间距" min={-20} max={200} /></Col>
-        <Col span={6}><NumberItem name="lineSpacing" label="行间距" min={0.5} max={3} step={0.1} /></Col><Col span={6}><NumberItem name="padding" label="内边距" min={0} max={2048} /></Col></Row>
-      <Row gutter={16}><Col span={6}><NumberItem name="canvasWidth" label="画布宽" min={256} max={4096} /></Col><Col span={6}><NumberItem name="canvasHeight" label="画布高" min={256} max={4096} /></Col>
-        <Col span={6}><NumberItem name="cellWidth" label="槽位宽" min={4} max={512} /></Col><Col span={6}><NumberItem name="cellHeight" label="槽位高" min={4} max={512} /></Col></Row>
-      <Row gutter={16}><Col span={6}><NumberItem name="gap" label="槽位间距" min={0} max={128} /></Col><Col span={6}><NumberItem name="coverageThreshold" label="覆盖阈值" min={0.5} max={0.98} step={0.01} /></Col>
-        <Col span={6}><Form.Item name="gridStrategy" label="网格策略"><Select options={[{ value: 'REGULAR', label: '规则网格' }, { value: 'STAGGERED', label: '交错网格' }]} /></Form.Item></Col>
-        <Col span={6}><Form.Item name="edgePolicy" label="边缘策略"><Select options={[{ value: 'STRICT', label: '严格包含' }, { value: 'INCLUDE_PARTIAL', label: '包含部分槽位' }]} /></Form.Item></Col></Row>
-    </Form>
-  </Modal>;
+function cellSizeForTarget(text: string, fontSize: number, gap: number, targetSlotCount: number) {
+  const estimatedInkArea = Math.max(1, Array.from(text.trim()).length) * fontSize * fontSize * 0.28;
+  return Math.max(4, Math.min(512, Math.round(Math.sqrt(estimatedInkArea / Math.max(100, targetSlotCount)) - gap)));
 }
-
-function LayoutModal({ open, saving, masks, form, onCancel, onFinish }: { open: boolean; saving: boolean; masks: TextMaskSummary[]; form: ReturnType<typeof Form.useForm<CreateAutoLayoutInput>>[0]; onCancel: () => void; onFinish: (values: CreateAutoLayoutInput) => void }) {
-  const initial = { name: '中国人能飞自动排版', maskId: masks[0]?.id, randomSeed: 20261001, allowPhotoReuse: true, maxPhotoReuse: 3, targetLabL: 128, targetLabA: 128, targetLabB: 128, candidateWindow: 64, optimizationIterations: 10000, weights: { quality: 1, brightness: 1, color: 1, crop: 1, duplicate: 1, adjacent: 1 } };
-  return <Modal width={760} title="新建自动排版" open={open} confirmLoading={saving} okText="创建并排版" cancelText="取消" onOk={() => form.submit()} onCancel={onCancel} destroyOnHidden>
-    <Form form={form} layout="vertical" initialValues={initial} onFinish={onFinish}>
-      <Row gutter={16}><Col span={12}><Form.Item name="name" label="布局名称" rules={[{ required: true }, { max: 120 }]}><Input /></Form.Item></Col>
-        <Col span={12}><Form.Item name="maskId" label="文字蒙版" rules={[{ required: true }]}><Select options={masks.map((mask) => ({ value: mask.id, label: `${mask.name}（${mask.slotCount} 槽位）` }))} /></Form.Item></Col></Row>
-      <Row gutter={16}><Col span={6}><NumberItem name="randomSeed" label="随机种子" /></Col><Col span={6}><NumberItem name="maxPhotoReuse" label="单图最多复用" min={1} max={100} /></Col>
-        <Col span={6}><NumberItem name="candidateWindow" label="候选窗口" min={8} max={512} /></Col><Col span={6}><NumberItem name="optimizationIterations" label="优化迭代" min={0} max={200000} /></Col></Row>
-      <Form.Item name="allowPhotoReuse" valuePropName="checked"><Checkbox>允许照片复用</Checkbox></Form.Item>
-      <Typography.Text type="secondary">目标 Lab 色彩</Typography.Text>
-      <Row gutter={16}><Col span={8}><NumberItem name="targetLabL" label="L" min={0} max={255} /></Col><Col span={8}><NumberItem name="targetLabA" label="A" min={0} max={255} /></Col><Col span={8}><NumberItem name="targetLabB" label="B" min={0} max={255} /></Col></Row>
-      <Typography.Text type="secondary">评分权重（0–10）</Typography.Text>
-      <Row gutter={16}><Col span={8}><NumberItem name={['weights', 'quality']} label="质量" min={0} max={10} step={0.1} /></Col><Col span={8}><NumberItem name={['weights', 'brightness']} label="亮度" min={0} max={10} step={0.1} /></Col><Col span={8}><NumberItem name={['weights', 'color']} label="色彩" min={0} max={10} step={0.1} /></Col>
-        <Col span={8}><NumberItem name={['weights', 'crop']} label="裁剪" min={0} max={10} step={0.1} /></Col><Col span={8}><NumberItem name={['weights', 'duplicate']} label="重复惩罚" min={0} max={10} step={0.1} /></Col><Col span={8}><NumberItem name={['weights', 'adjacent']} label="相邻惩罚" min={0} max={10} step={0.1} /></Col></Row>
-    </Form>
-  </Modal>;
-}
-
-function NumberItem({ name, label, min, max, step }: { name: string | (string | number)[]; label: string; min?: number; max?: number; step?: number }) {
-  return <Form.Item name={name} label={label} rules={[{ required: true }]}><InputNumber min={min} max={max} step={step} style={{ width: '100%' }} /></Form.Item>;
-}
-function StatusTag({ value }: { value: string }) { return <Tag color={value === 'READY' || value === 'SUCCEEDED' ? 'success' : value === 'FAILED' ? 'error' : 'processing'}>{value}</Tag>; }
-function formatTime(value: string) { return value ? new Date(value).toLocaleString('zh-CN') : '—'; }
 function messageOf(cause: unknown) { return cause instanceof Error ? cause.message : '操作失败'; }

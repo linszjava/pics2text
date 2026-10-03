@@ -16,6 +16,8 @@ public class ProjectEntity {
     private String configurationJson;
     private Integer retentionDays;
     private Long maxPhotoBytes;
+    private UUID activeLayoutId;
+    private UUID activeTextMaskId;
     private Instant archivedAt;
     private UUID createdBy;
     private Instant createdAt;
@@ -52,6 +54,10 @@ public class ProjectEntity {
     public void setRetentionDays(Integer retentionDays) { this.retentionDays = retentionDays; }
     public Long getMaxPhotoBytes() { return maxPhotoBytes; }
     public void setMaxPhotoBytes(Long maxPhotoBytes) { this.maxPhotoBytes = maxPhotoBytes; }
+    public UUID getActiveLayoutId() { return activeLayoutId; }
+    public void setActiveLayoutId(UUID activeLayoutId) { this.activeLayoutId = activeLayoutId; }
+    public UUID getActiveTextMaskId() { return activeTextMaskId; }
+    public void setActiveTextMaskId(UUID activeTextMaskId) { this.activeTextMaskId = activeTextMaskId; }
     public Instant getArchivedAt() { return archivedAt; }
     public void setArchivedAt(Instant archivedAt) { this.archivedAt = archivedAt; }
     public UUID getCreatedBy() { return createdBy; }

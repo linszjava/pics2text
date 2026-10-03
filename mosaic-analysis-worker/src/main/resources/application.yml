@@ -18,6 +18,7 @@ spring:
       simple:
         acknowledge-mode: manual
         prefetch: ${JOB_WORKER_PREFETCH:4}
+        observation-enabled: true
 
 jobs:
   worker:
@@ -56,6 +57,20 @@ mybatis-plus:
     banner: false
 
 management:
+  otlp:
+    metrics:
+      export:
+        enabled: false
+  tracing:
+    sampling:
+      probability: ${TRACING_SAMPLING_PROBABILITY:1.0}
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          endpoint: ${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:http://localhost:4318/v1/traces}
+    resource-attributes:
+      deployment.environment: ${DEPLOYMENT_ENVIRONMENT:local}
   endpoints:
     web:
       exposure:

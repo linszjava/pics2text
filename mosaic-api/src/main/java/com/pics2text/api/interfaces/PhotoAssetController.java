@@ -6,10 +6,8 @@ import com.pics2text.api.infrastructure.storage.ObjectStorageGateway;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
-import com.pics2text.photoasset.domain.ReviewStatus;
 import java.net.URI;
 import java.time.Instant;
 import java.util.List;
@@ -19,6 +17,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -81,21 +80,28 @@ public class PhotoAssetController {
         return PhotoResponse.from(service.get(projectId, photoId));
     }
 
+    @PatchMapping("/{photoId}")
+    public PhotoResponse rename(@PathVariable UUID projectId, @PathVariable UUID photoId,
+            @Valid @RequestBody RenamePhotoRequest request) {
+        return PhotoResponse.from(service.rename(projectId, photoId, request.filename()));
+    }
+
     @GetMapping("/{photoId}/analysis")
     public PhotoAssetService.AnalysisResult analysis(@PathVariable UUID projectId,
             @PathVariable UUID photoId) {
         return service.analysis(projectId, photoId);
     }
 
-    @PostMapping("/{photoId}/review")
-    public PhotoResponse review(@PathVariable UUID projectId, @PathVariable UUID photoId,
-            @Valid @RequestBody ManualReviewRequest request) {
-        return PhotoResponse.from(service.review(projectId, photoId, request.decision(), request.note()));
-    }
-
     @PostMapping("/{photoId}/download-url")
     public PresignedResponse download(@PathVariable UUID projectId, @PathVariable UUID photoId) {
         return PresignedResponse.from(service.download(projectId, photoId));
+    }
+
+    @PostMapping("/{photoId}/preview-urls")
+    public PhotoPreviewResponse preview(@PathVariable UUID projectId, @PathVariable UUID photoId) {
+        var result = service.preview(projectId, photoId);
+        return new PhotoPreviewResponse(PresignedResponse.from(result.thumbnail()),
+                PresignedResponse.from(result.preview()));
     }
 
     @PostMapping("/{photoId}/withdraw")
@@ -118,9 +124,7 @@ public class PhotoAssetController {
 
     public record CompleteUploadRequest(List<@Valid CompletedPartRequest> parts) {}
     public record CompletedPartRequest(@Min(1) int partNumber, @NotBlank String eTag) {}
-    public record ManualReviewRequest(@NotNull ReviewStatus decision,
-            @NotBlank @Size(max = 500) String note) {}
-
+    public record RenamePhotoRequest(@NotBlank @Size(max = 255) String filename) {}
     public record InitiatedUploadResponse(PhotoResponse photo, boolean duplicate,
             PresignedResponse directUpload, Long partSize, Integer partCount, Instant expiresAt) {
         static InitiatedUploadResponse from(PhotoAssetService.InitiatedUpload result) {
@@ -140,22 +144,22 @@ public class PhotoAssetController {
         }
     }
 
+    public record PhotoPreviewResponse(PresignedResponse thumbnail, PresignedResponse preview) {}
+
     public record PhotoResponse(UUID id, UUID projectId, UUID uploaderId, String originalFilename,
             String declaredContentType, String detectedContentType, long byteSize, Integer width,
-            Integer height, String sha256, String authorizationStatus, String reviewStatus,
+            Integer height, String sha256, String authorizationStatus,
             String status, String analysisStatus, String uploadMode, UUID duplicateOf, String failureCode,
             String failureMessage, String analysisErrorCode, String analysisErrorMessage,
-            UUID reviewedBy, Instant reviewedAt, String reviewNote, Instant retentionUntil,
-            Instant availableAt, Instant createdAt, Instant updatedAt) {
+            Instant retentionUntil, Instant availableAt, Instant createdAt, Instant updatedAt) {
         static PhotoResponse from(PhotoAssetEntity asset) {
             return new PhotoResponse(asset.getId(), asset.getProjectId(), asset.getUploaderId(),
                     asset.getOriginalFilename(), asset.getDeclaredContentType(), asset.getDetectedContentType(),
                     asset.getByteSize(), asset.getWidth(), asset.getHeight(), asset.getSha256(),
-                    asset.getAuthorizationStatus(), asset.getReviewStatus(), asset.getStatus(),
+                    asset.getAuthorizationStatus(), asset.getStatus(),
                     asset.getAnalysisStatus(), asset.getUploadMode(), asset.getDuplicateOf(),
                     asset.getFailureCode(), asset.getFailureMessage(), asset.getAnalysisErrorCode(),
-                    asset.getAnalysisErrorMessage(), asset.getReviewedBy(), asset.getReviewedAt(),
-                    asset.getReviewNote(), asset.getRetentionUntil(), asset.getAvailableAt(),
+                    asset.getAnalysisErrorMessage(), asset.getRetentionUntil(), asset.getAvailableAt(),
                     asset.getCreatedAt(), asset.getUpdatedAt());
         }
     }

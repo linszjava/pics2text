@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { Application, Assets, Container, Graphics, Sprite, Texture } from 'pixi.js';
 import type { Assignment } from './types';
 import { fitTransform, visibleBounds, zoomAt, type Bounds, type ViewTransform } from './viewport';
@@ -24,6 +24,7 @@ export const PixiLayoutCanvas = forwardRef<CanvasHandle, Props>(function PixiLay
   const appRef = useRef<Application | null>(null);
   const worldRef = useRef<Container | null>(null);
   const transformRef = useRef<ViewTransform>({ scale: 1, x: 0, y: 0 });
+  const [rendererReady, setRendererReady] = useState(false);
   const propsRef = useRef(props);
   propsRef.current = props;
 
@@ -73,13 +74,14 @@ export const PixiLayoutCanvas = forwardRef<CanvasHandle, Props>(function PixiLay
     let dragging = false;
     let lastX = 0;
     let lastY = 0;
-    void app.init({ resizeTo: host, background: '#12161d', antialias: true }).then(() => {
+    void app.init({ resizeTo: host, background: '#edf3f9', antialias: true }).then(() => {
       if (disposed) { app.destroy(true); return; }
       appRef.current = app;
       const world = new Container();
       worldRef.current = world;
       app.stage.addChild(world);
       host.appendChild(app.canvas);
+      setRendererReady(true);
       transformRef.current = fitTransform(app.screen.width, app.screen.height,
         propsRef.current.canvasWidth, propsRef.current.canvasHeight);
       applyTransform();
@@ -155,11 +157,13 @@ export const PixiLayoutCanvas = forwardRef<CanvasHandle, Props>(function PixiLay
         sprite.position.set(-assignment.cropX * fullWidth, -assignment.cropY * fullHeight);
         sprite.width = fullWidth; sprite.height = fullHeight;
         const mask = new Graphics().rect(0, 0, assignment.width, assignment.height).fill(0xffffff);
-        cell.addChildAt(sprite, 0); cell.addChild(mask); sprite.mask = mask;
+        // Keep the opaque placeholder behind the loaded photo. The selection outline
+        // stays above both layers so zooming reveals the actual image in each slot.
+        cell.addChildAt(sprite, 1); cell.addChild(mask); sprite.mask = mask;
       }).catch(() => undefined);
     }
     return () => { active = false; };
-  }, [props.assignments, props.photoUrls, props.selectedSlot, props.canvasWidth, props.canvasHeight]);
+  }, [rendererReady, props.assignments, props.photoUrls, props.selectedSlot, props.canvasWidth, props.canvasHeight]);
 
   return <div className="canvas-host" ref={hostRef} />;
 });

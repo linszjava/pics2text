@@ -45,7 +45,7 @@ export function LoginPage({ returnTo }: { returnTo?: string }) {
         <Text className="eyebrow">工作台</Text>
         <Title level={2}>{mode === 'login' ? '登录' : '创建'} Pics2Text 账号</Title>
         <Paragraph type="secondary">{mode === 'login'
-          ? '使用平台账号继续访问当前项目。' : '注册普通用户账号，完成后将自动登录。'}</Paragraph>
+          ? '使用平台账号继续访问当前项目。' : '注册账号，完成后将自动登录。'}</Paragraph>
       </Space>
       <Segmented block value={mode} onChange={switchMode} options={[
         { label: '账号登录', value: 'login' }, { label: '创建账号', value: 'register' },

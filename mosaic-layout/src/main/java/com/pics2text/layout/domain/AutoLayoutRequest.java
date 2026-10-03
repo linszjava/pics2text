@@ -4,8 +4,8 @@ public record AutoLayoutRequest(long randomSeed, boolean allowPhotoReuse, int ma
         double targetLabL, double targetLabA, double targetLabB, int candidateWindow,
         int optimizationIterations, LayoutWeights weights) {
     public AutoLayoutRequest {
-        if (maxPhotoReuse < 1 || maxPhotoReuse > 100) {
-            throw new IllegalArgumentException("单张照片最大使用次数必须在1到100之间");
+        if (maxPhotoReuse < 1 || maxPhotoReuse > 10_000) {
+            throw new IllegalArgumentException("单张照片最大使用次数必须在1到10000之间");
         }
         if (!allowPhotoReuse && maxPhotoReuse != 1) {
             throw new IllegalArgumentException("禁止重复照片时最大使用次数必须为1");

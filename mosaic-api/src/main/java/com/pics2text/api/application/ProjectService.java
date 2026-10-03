@@ -3,11 +3,9 @@ package com.pics2text.api.application;
 import com.pics2text.api.common.ApiException;
 import com.pics2text.api.infrastructure.persistence.ProjectEntity;
 import com.pics2text.api.infrastructure.persistence.ProjectMapper;
-import com.pics2text.api.infrastructure.persistence.ProjectMemberEntity;
-import com.pics2text.api.infrastructure.persistence.ProjectMemberMapper;
+import com.pics2text.layout.infrastructure.persistence.TextMaskMapper;
 import com.pics2text.identity.domain.User;
 import com.pics2text.project.domain.ProjectPermission;
-import com.pics2text.project.domain.ProjectRole;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 import java.time.Instant;
@@ -21,26 +19,23 @@ import org.springframework.transaction.annotation.Transactional;
 public class ProjectService {
 
     private final ProjectMapper projectMapper;
-    private final ProjectMemberMapper projectMemberMapper;
+    private final TextMaskMapper textMaskMapper;
     private final ProjectAccessService projectAccessService;
     private final AuthenticationService authenticationService;
-    private final UserService userService;
     private final AuditService auditService;
     private final ObjectMapper objectMapper;
 
     public ProjectService(
             ProjectMapper projectMapper,
-            ProjectMemberMapper projectMemberMapper,
+            TextMaskMapper textMaskMapper,
             ProjectAccessService projectAccessService,
             AuthenticationService authenticationService,
-            UserService userService,
             AuditService auditService,
             ObjectMapper objectMapper) {
         this.projectMapper = projectMapper;
-        this.projectMemberMapper = projectMemberMapper;
+        this.textMaskMapper = textMaskMapper;
         this.projectAccessService = projectAccessService;
         this.authenticationService = authenticationService;
-        this.userService = userService;
         this.auditService = auditService;
         this.objectMapper = objectMapper;
     }
@@ -56,8 +51,6 @@ public class ProjectService {
         ProjectEntity project = new ProjectEntity(
                 UUID.randomUUID(), normalizedName, "ACTIVE", actor.id(), now, now);
         projectMapper.insert(project);
-        projectMemberMapper.insert(new ProjectMemberEntity(
-                project.getId(), actor.id(), ProjectRole.PROJECT_ADMIN.name(), actor.id(), now));
         auditService.record(actor.id(), "PROJECT_CREATE", "PROJECT", project.getId().toString(), true);
         return project;
     }
@@ -68,8 +61,7 @@ public class ProjectService {
     }
 
     public List<ProjectEntity> list() {
-        User actor = authenticationService.currentUser();
-        return projectMapper.listVisible(actor.id(), actor.administrator());
+        return projectMapper.listByCreator(authenticationService.currentUser().id());
     }
 
     @Transactional
@@ -111,64 +103,22 @@ public class ProjectService {
         return project;
     }
 
-    public List<MemberView> listMembers(UUID projectId) {
-        projectAccessService.require(projectId, ProjectPermission.VIEW);
-        return projectMemberMapper.listByProject(projectId)
-                .stream()
-                .map(member -> new MemberView(
-                        userService.require(member.getUserId()),
-                        ProjectRole.valueOf(member.getRole()),
-                        member.getCreatedAt()))
-                .toList();
-    }
-
     @Transactional
-    public MemberView putMember(UUID projectId, UUID userId, ProjectRole role) {
-        User actor = projectAccessService.require(projectId, ProjectPermission.MANAGE_MEMBERS);
-        User target = userService.require(userId);
-        if (!target.active()) {
-            throw new ApiException("USER_DISABLED", "不能添加已停用用户", HttpStatus.CONFLICT);
+    public ProjectEntity selectTextMask(UUID projectId, UUID maskId) {
+        projectAccessService.require(projectId, ProjectPermission.EDIT_LAYOUT);
+        ProjectEntity project = projectAccessService.requireProject(projectId);
+        if (!"ACTIVE".equals(project.getStatus())) {
+            throw new ApiException("PROJECT_ARCHIVED", "已归档项目不能设置文字方案", HttpStatus.CONFLICT);
         }
-        ProjectMemberEntity existing = projectAccessService.membership(projectId, userId);
-        if (existing == null) {
-            existing = new ProjectMemberEntity(projectId, userId, role.name(), actor.id(), Instant.now());
-            projectMemberMapper.insert(existing);
-        } else {
-            if (ProjectRole.PROJECT_ADMIN.name().equals(existing.getRole())
-                    && role != ProjectRole.PROJECT_ADMIN) {
-                ensureAnotherAdministrator(projectId);
-            }
-            projectMemberMapper.updateRole(projectId, userId, role.name());
-            existing.setRole(role.name());
+        var mask = textMaskMapper.selectById(maskId);
+        if (mask == null || !projectId.equals(mask.getProjectId())) {
+            throw new ApiException("TEXT_MASK_NOT_FOUND", "文字方案不存在", HttpStatus.NOT_FOUND);
         }
-        auditService.record(actor.id(), "PROJECT_MEMBER_PUT", "PROJECT_MEMBER",
-                projectId + ":" + userId, true);
-        return new MemberView(target, role, existing.getCreatedAt());
-    }
-
-    @Transactional
-    public void removeMember(UUID projectId, UUID userId) {
-        User actor = projectAccessService.require(projectId, ProjectPermission.MANAGE_MEMBERS);
-        ProjectMemberEntity membership = projectAccessService.membership(projectId, userId);
-        if (membership == null) {
-            throw new ApiException("PROJECT_MEMBER_NOT_FOUND", "项目成员不存在", HttpStatus.NOT_FOUND);
-        }
-        if (ProjectRole.PROJECT_ADMIN.name().equals(membership.getRole())) {
-            ensureAnotherAdministrator(projectId);
-        }
-        projectMemberMapper.deleteMembership(projectId, userId);
-        auditService.record(actor.id(), "PROJECT_MEMBER_DELETE", "PROJECT_MEMBER",
-                projectId + ":" + userId, true);
-    }
-
-    private void ensureAnotherAdministrator(UUID projectId) {
-        long administrators = projectMemberMapper.countAdministrators(projectId);
-        if (administrators <= 1) {
-            throw new ApiException(
-                    "LAST_PROJECT_ADMIN",
-                    "项目必须至少保留一名项目管理员",
-                    HttpStatus.CONFLICT);
-        }
+        project.setActiveTextMaskId(maskId);
+        project.setActiveLayoutId(null);
+        project.setUpdatedAt(Instant.now());
+        projectMapper.updateById(project);
+        return project;
     }
 
     private void validateConfiguration(String json) {
@@ -181,6 +131,4 @@ public class ProjectService {
         }
     }
 
-    public record MemberView(User user, ProjectRole role, Instant createdAt) {
-    }
 }

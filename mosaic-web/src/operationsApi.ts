@@ -8,6 +8,8 @@ export interface ProjectSummary {
   description: string;
   createdAt: string;
   updatedAt: string;
+  activeLayoutId: string | null;
+  activeTextMaskId: string | null;
 }
 
 export interface PhotoSummary {
@@ -16,7 +18,6 @@ export interface PhotoSummary {
   byteSize: number;
   status: string;
   analysisStatus: string;
-  reviewStatus: string;
   duplicateOf: string | null;
   failureCode?: string | null;
   failureMessage?: string | null;
@@ -24,6 +25,15 @@ export interface PhotoSummary {
   analysisErrorMessage?: string | null;
   retentionUntil?: string | null;
   createdAt: string;
+}
+
+export interface PhotoAnalysisResult {
+  analysis: {
+    sharpness: number; brightness: number; contrast: number;
+    labL: number; labA: number; labB: number;
+    faceCount: number; cropX: number; cropY: number; cropWidth: number; cropHeight: number;
+    autoReviewDecision: string; reviewReasonsJson: string; analyzedAt: string;
+  };
 }
 
 export interface JobSummary {
@@ -54,31 +64,6 @@ export interface CreateRenderInput {
   compression: 'ZSTD' | 'LZW' | 'DEFLATE'; cropMarks: boolean; registrationMarks: boolean;
 }
 
-export interface UserSummary extends AuthenticatedUser {
-  status: 'ACTIVE' | 'DISABLED';
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface AuditSummary {
-  id: number;
-  actorUserId: string | null;
-  action: string;
-  targetType: string;
-  targetId: string | null;
-  success: boolean;
-  requestId: string | null;
-  createdAt: string;
-}
-
-export type ProjectRole = 'PROJECT_ADMIN' | 'REVIEWER' | 'DESIGNER' | 'VIEWER';
-
-export interface ProjectMember {
-  user: UserSummary;
-  role: ProjectRole;
-  createdAt: string;
-}
-
 export interface FontAsset {
   id: string;
   family: string;
@@ -106,6 +91,7 @@ export interface AutoLayoutSummary {
   maskId: string;
   name: string;
   status: string;
+  candidateCount: number;
   slotCount: number;
   assignedCount: number;
   uniquePhotoCount: number | null;
@@ -130,6 +116,7 @@ export interface CreateAutoLayoutInput {
 }
 
 export interface PresignedRequest { url: string; method: 'PUT' | 'GET'; headers: Record<string, string[]> }
+export interface PhotoPreview { thumbnail: PresignedRequest; preview: PresignedRequest }
 export interface InitiatedPhotoUpload {
   photo: PhotoSummary; duplicate: boolean; directUpload: PresignedRequest | null;
   partSize: number | null; partCount: number; expiresAt: string;
@@ -144,8 +131,19 @@ export class OperationsApi {
   setProjectArchived(projectId: string, archived: boolean): Promise<ProjectSummary> {
     return this.request(`/api/v1/projects/${projectId}/${archived ? 'archive' : 'activate'}`, { method: 'POST' });
   }
-  photos(projectId: string): Promise<PhotoSummary[]> {
-    return this.request(`/api/v1/projects/${projectId}/photos?page=0&size=200`);
+  selectTextMask(projectId: string, maskId: string): Promise<ProjectSummary> {
+    return this.request(`/api/v1/projects/${projectId}/active-text-mask`, {
+      method: 'PUT', body: JSON.stringify({ maskId }),
+    });
+  }
+  async photos(projectId: string): Promise<PhotoSummary[]> {
+    const all: PhotoSummary[] = [];
+    const pageSize = 100;
+    for (let page = 0; ; page += 1) {
+      const batch = await this.request<PhotoSummary[]>(`/api/v1/projects/${projectId}/photos?page=${page}&size=${pageSize}`);
+      all.push(...batch);
+      if (batch.length < pageSize) return all;
+    }
   }
   initiatePhotoUpload(projectId: string, input: { filename: string; contentType: string; byteSize: number; sha256: string; authorizationGranted: boolean }): Promise<InitiatedPhotoUpload> {
     return this.request(`/api/v1/projects/${projectId}/photos/uploads`, { method: 'POST', body: JSON.stringify(input) });
@@ -166,9 +164,15 @@ export class OperationsApi {
     if (!response.ok) throw new Error(`对象存储上传失败：${response.status}`);
     return response.headers.get('etag');
   }
-  reviewPhoto(projectId: string, photoId: string, decision: 'APPROVED' | 'REJECTED', note: string): Promise<PhotoSummary> {
-    return this.request(`/api/v1/projects/${projectId}/photos/${photoId}/review`, {
-      method: 'POST', body: JSON.stringify({ decision, note }),
+  photoPreview(projectId: string, photoId: string): Promise<PhotoPreview> {
+    return this.request(`/api/v1/projects/${projectId}/photos/${photoId}/preview-urls`, { method: 'POST' });
+  }
+  photoAnalysis(projectId: string, photoId: string): Promise<PhotoAnalysisResult> {
+    return this.request(`/api/v1/projects/${projectId}/photos/${photoId}/analysis`);
+  }
+  renamePhoto(projectId: string, photoId: string, filename: string): Promise<PhotoSummary> {
+    return this.request(`/api/v1/projects/${projectId}/photos/${photoId}`, {
+      method: 'PATCH', body: JSON.stringify({ filename }),
     });
   }
   withdrawPhoto(projectId: string, photoId: string): Promise<PhotoSummary> {
@@ -203,16 +207,49 @@ export class OperationsApi {
   layouts(projectId: string): Promise<EditableLayout[]> {
     return this.request(`/api/v1/projects/${projectId}/editable-layouts?page=0&size=100`);
   }
-  projectMembers(projectId: string): Promise<ProjectMember[]> {
-    return this.request(`/api/v1/projects/${projectId}/members`);
-  }
-  putProjectMember(projectId: string, userId: string, role: ProjectRole): Promise<ProjectMember> {
-    return this.request(`/api/v1/projects/${projectId}/members/${userId}`, {
-      method: 'PUT', body: JSON.stringify({ role }),
+  createEditableLayout(projectId: string, sourceAutoLayoutId: string, name: string): Promise<EditableLayout> {
+    return this.request(`/api/v1/projects/${projectId}/editable-layouts`, {
+      method: 'POST', body: JSON.stringify({ sourceAutoLayoutId, name }),
     });
   }
-  async removeProjectMember(projectId: string, userId: string): Promise<void> {
-    await this.request(`/api/v1/projects/${projectId}/members/${userId}`, { method: 'DELETE' });
+  lockEditableLayout(projectId: string, layoutId: string, expectedLockVersion: number): Promise<{ layout: EditableLayout }> {
+    return this.request(`/api/v1/projects/${projectId}/editable-layouts/${layoutId}/lock`, {
+      method: 'POST', body: JSON.stringify({ expectedLockVersion, note: '进入三维预览' }),
+    });
+  }
+  surfaceTemplates(projectId: string): Promise<Array<{ template: { id: string; name: string; diameterMm: number; axialLengthMm: number } }>> {
+    return this.request(`/api/v1/projects/${projectId}/surface-templates?page=0&size=100`);
+  }
+  createSurfaceTemplate(projectId: string): Promise<{ template: { id: string; name: string; diameterMm: number; axialLengthMm: number } }> {
+    return this.request(`/api/v1/projects/${projectId}/surface-templates`, {
+      method: 'POST', body: JSON.stringify({ name: '演示火箭曲面', diameterMm: 2500, axialLengthMm: 8000,
+        seamXmm: 0, seamSafetyMm: 0, safeTopMm: 0, safeRightMm: 0, safeBottomMm: 0, safeLeftMm: 0, regions: [] }),
+    });
+  }
+  bindSurface(projectId: string, layout: EditableLayout, template: { id: string; diameterMm: number; axialLengthMm: number }): Promise<unknown> {
+    const circumference = Math.PI * template.diameterMm;
+    const scale = Math.min((circumference * .72) / layout.canvasWidth, (template.axialLengthMm * .78) / layout.canvasHeight);
+    const printWidthMm = layout.canvasWidth * scale;
+    const printHeightMm = layout.canvasHeight * scale;
+    return this.request(`/api/v1/projects/${projectId}/editable-layouts/${layout.id}/surface-binding`, {
+      method: 'POST', body: JSON.stringify({ templateId: template.id, layoutVersionId: layout.currentVersionId,
+        originXmm: (circumference - printWidthMm) / 2, originYmm: (template.axialLengthMm - printHeightMm) / 2,
+        printWidthMm, printHeightMm }),
+    });
+  }
+  createLayoutPreview(projectId: string, layoutId: string): Promise<unknown> {
+    return this.request(`/api/v1/projects/${projectId}/editable-layouts/${layoutId}/previews`, { method: 'POST' });
+  }
+  renameEditableLayout(projectId: string, layoutId: string, name: string, expectedLockVersion: number): Promise<EditableLayout> {
+    return this.request(`/api/v1/projects/${projectId}/editable-layouts/${layoutId}`, {
+      method: 'PATCH', body: JSON.stringify({ name, expectedLockVersion }),
+    });
+  }
+  async deleteEditableLayout(projectId: string, layoutId: string): Promise<void> {
+    await this.request(`/api/v1/projects/${projectId}/editable-layouts/${layoutId}`, { method: 'DELETE' });
+  }
+  activateEditableLayout(projectId: string, layoutId: string): Promise<EditableLayout> {
+    return this.request(`/api/v1/projects/${projectId}/editable-layouts/${layoutId}/activate`, { method: 'PUT' });
   }
   fonts(): Promise<FontAsset[]> { return this.request('/api/v1/layout/fonts'); }
   textMasks(projectId: string): Promise<TextMaskSummary[]> {
@@ -221,24 +258,21 @@ export class OperationsApi {
   createTextMask(projectId: string, input: CreateTextMaskInput): Promise<{ mask: TextMaskSummary; jobId: string }> {
     return this.request(`/api/v1/projects/${projectId}/text-masks`, { method: 'POST', body: JSON.stringify(input) });
   }
+  async deleteTextMask(projectId: string, maskId: string): Promise<void> {
+    await this.request(`/api/v1/projects/${projectId}/text-masks/${maskId}`, { method: 'DELETE' });
+  }
+  textMaskPreview(projectId: string, maskId: string): Promise<PresignedRequest> {
+    return this.request(`/api/v1/projects/${projectId}/text-masks/${maskId}/preview-url`, { method: 'POST' });
+  }
   autoLayouts(projectId: string): Promise<AutoLayoutSummary[]> {
     return this.request(`/api/v1/projects/${projectId}/layouts?page=0&size=100`);
   }
   createAutoLayout(projectId: string, input: CreateAutoLayoutInput): Promise<{ layout: AutoLayoutSummary; jobId: string }> {
     return this.request(`/api/v1/projects/${projectId}/layouts`, { method: 'POST', body: JSON.stringify(input) });
   }
-  users(): Promise<UserSummary[]> { return this.request('/api/v1/admin/users'); }
-  createUser(input: { username: string; password: string; displayName: string; globalRole: 'ADMIN' | 'USER' }): Promise<UserSummary> {
-    return this.request('/api/v1/admin/users', { method: 'POST', body: JSON.stringify(input) });
+  async deleteAutoLayout(projectId: string, layoutId: string): Promise<void> {
+    await this.request(`/api/v1/projects/${projectId}/layouts/${layoutId}`, { method: 'DELETE' });
   }
-  changeUserStatus(userId: string, status: 'ACTIVE' | 'DISABLED'): Promise<UserSummary> {
-    return this.request(`/api/v1/admin/users/${userId}/status`, { method: 'PATCH', body: JSON.stringify({ status }) });
-  }
-  async kickUser(userId: string): Promise<void> {
-    await this.request(`/api/v1/admin/users/${userId}/kick`, { method: 'POST' });
-  }
-  auditLogs(): Promise<AuditSummary[]> { return this.request('/api/v1/admin/audit-logs'); }
-
   private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const response = await fetch(path, { ...init, headers: {
       'Content-Type': 'application/json', Authorization: `Bearer ${authToken()}`, ...init.headers,

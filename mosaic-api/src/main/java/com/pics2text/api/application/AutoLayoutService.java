@@ -117,6 +117,14 @@ public class AutoLayoutService {
         return mapper.listAssignments(layoutId, safeSize, (long) safePage * safeSize);
     }
 
+    @Transactional
+    public void delete(UUID projectId, UUID layoutId) {
+        User actor = access.require(projectId, ProjectPermission.EDIT_LAYOUT);
+        require(projectId, layoutId);
+        mapper.deleteById(layoutId);
+        audit.record(actor.id(), "AUTO_LAYOUT_DELETE", "AUTO_LAYOUT", layoutId.toString(), true);
+    }
+
     private AutoLayoutEntity require(UUID projectId, UUID layoutId) {
         AutoLayoutEntity layout = mapper.selectById(layoutId);
         if (layout == null || !projectId.equals(layout.getProjectId())) {
