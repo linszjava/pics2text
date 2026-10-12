@@ -1,7 +1,14 @@
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { SSAOPass } from 'three/examples/jsm/postprocessing/SSAOPass.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import type { SurfaceManifest } from './types';
+import { createLaunchEnvironment, addRocketDetails } from './launchEnvironment';
+import { createExhaustMaterial, createLaunchSmoke, launchMotion } from './launchEffects';
+import { addRocketTail, CZ12B } from './rocketTail';
 
 interface Props {
   manifest: SurfaceManifest;
@@ -12,55 +19,88 @@ interface Props {
   simulationDirection?: 'HORIZONTAL' | 'VERTICAL';
   focusMode?: 'ROCKET' | 'TEXT';
   showEngineeringGuides?: boolean;
+  launchCommand?: { id: number; action: 'START' | 'RESET' };
+  onLaunchComplete?: () => void;
 }
 
 export function ThreeSurfaceCanvas({ manifest, textureUrl, photoUrls, useSimulationTexture = false,
-    simulationText = '', simulationDirection = 'VERTICAL', focusMode = 'ROCKET', showEngineeringGuides = false }: Props) {
+    simulationText = '', simulationDirection = 'VERTICAL', focusMode = 'ROCKET', showEngineeringGuides = false,
+    launchCommand, onLaunchComplete }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
+  const launchControlRef = useRef<((action: 'START' | 'RESET') => void) | null>(null);
+  const launchActiveRef = useRef(false);
+  const launchElapsedRef = useRef(0);
+  const focusControlRef = useRef<((mode: 'ROCKET' | 'TEXT') => void) | null>(null);
+  const focusModeRef = useRef(focusMode);
+  focusModeRef.current = focusMode;
+  const onLaunchCompleteRef = useRef(onLaunchComplete);
+  onLaunchCompleteRef.current = onLaunchComplete;
 
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
+    const focusMode = focusModeRef.current;
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 3));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 0.85;
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     host.appendChild(renderer.domElement);
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0xdce8f5);
+    scene.background = new THREE.Color(0xd5d4ce);
     const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 100_000);
     const { radiusMm, axialLengthMm } = manifest.surface;
     const displayAxialLengthMm = useSimulationTexture
       ? Math.max(axialLengthMm, radiusMm * 5.2) : axialLengthMm;
-    const upperBodyHeight = Math.max(radiusMm * 2.8, axialLengthMm * 0.7);
-    const lowerBodyHeight = Math.max(radiusMm * 3.6, axialLengthMm);
-    const fairingHeight = Math.max(radiusMm * 3.6, axialLengthMm * 0.9);
+    const upperBodyHeight = radiusMm * 4;
+    const fairingHeight = radiusMm * 5;
+    const lowerBodyHeight = Math.max(radiusMm * 8,
+      radiusMm * 2 * CZ12B.heightM / CZ12B.diameterM - displayAxialLengthMm
+      - upperBodyHeight - fairingHeight - radiusMm * 0.85);
     const totalHeight = upperBodyHeight + displayAxialLengthMm + lowerBodyHeight
       + fairingHeight;
-    const fullRocketDistance = Math.max(radiusMm * 8, totalHeight * 1.35);
+    const groundY = -displayAxialLengthMm / 2 - lowerBodyHeight
+      - radiusMm * 0.85 - radiusMm * 3.3;
+    const rocketTop = displayAxialLengthMm / 2 + upperBodyHeight + fairingHeight;
+    const sceneCenterY = (groundY + rocketTop) / 2;
+    const fullRocketDistance = Math.max(radiusMm * 8, (rocketTop - groundY) * 1.3);
     const textFocusDistance = Math.max(radiusMm * 3.4, displayAxialLengthMm * 1.42);
     const distance = focusMode === 'TEXT' ? textFocusDistance : fullRocketDistance;
     camera.near = Math.max(1, radiusMm * 0.005);
-    camera.far = Math.max(totalHeight * 6, fullRocketDistance * 4);
+    camera.far = totalHeight * 150;
     camera.updateProjectionMatrix();
+    const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(1, 1,
+      { type: THREE.HalfFloatType, samples: 4 }));
+    const renderPass = new RenderPass(scene, camera);
+    const contactShadowPass = new SSAOPass(scene, camera, 1, 1, 16);
+    contactShadowPass.kernelRadius = radiusMm * 0.8;
+    contactShadowPass.minDistance = radiusMm * 0.015 / camera.far;
+    contactShadowPass.maxDistance = radiusMm * 3 / camera.far;
+    const outputPass = new OutputPass();
+    composer.addPass(renderPass); composer.addPass(contactShadowPass); composer.addPass(outputPass);
     camera.position.set(focusMode === 'TEXT' ? 0 : distance * 0.35,
-      focusMode === 'TEXT' ? 0 : totalHeight * 0.02, distance);
+      focusMode === 'TEXT' ? 0 : sceneCenterY + totalHeight * 0.02, distance);
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
-    controls.target.set(0, 0, 0);
+    controls.target.set(0, focusMode === 'TEXT' ? 0 : sceneCenterY, 0);
     controls.minDistance = radiusMm + Math.max(20, radiusMm * 0.02);
     controls.maxDistance = fullRocketDistance * 2.4;
+    controls.maxPolarAngle = Math.PI * 0.49;
     const rocket = new THREE.Group();
     scene.add(rocket);
+    const environment = createLaunchEnvironment(scene, renderer, radiusMm, totalHeight, groundY);
     const photoLayer = new THREE.Group();
     rocket.add(photoLayer);
-    const shellMaterial = new THREE.MeshStandardMaterial({ color: 0xf3f6fa, roughness: 0.58,
-      metalness: 0.06, side: THREE.DoubleSide });
+    const shellMaterial = new THREE.MeshStandardMaterial({ color: 0xf0eee7, roughness: 0.36,
+      metalness: 0.22, side: THREE.DoubleSide });
     const lowerMaterial = new THREE.MeshStandardMaterial({ color: 0xe7ecf2, roughness: 0.6,
       metalness: 0.08, side: THREE.DoubleSide });
-    const engineMaterial = new THREE.MeshStandardMaterial({ color: 0x46515e, roughness: 0.7,
-      metalness: 0.28, side: THREE.DoubleSide });
-    const navyMaterial = new THREE.MeshStandardMaterial({ color: 0x173f78, roughness: 0.5,
-      metalness: 0.04, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+    const engineMaterial = new THREE.MeshStandardMaterial({ color: 0x383b3c, roughness: 0.38,
+      metalness: 0.85, side: THREE.DoubleSide });
+    const navyMaterial = new THREE.MeshStandardMaterial({ color: 0x8e9697, roughness: 0.5,
+      metalness: 0.55, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
     const redMaterial = new THREE.MeshStandardMaterial({ color: 0xc92f3c, roughness: 0.54,
       metalness: 0.03, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
     const geometry = new THREE.CylinderGeometry(radiusMm, radiusMm, displayAxialLengthMm, 128, 1, false);
@@ -68,39 +108,52 @@ export function ThreeSurfaceCanvas({ manifest, textureUrl, photoUrls, useSimulat
       metalness: 0.08, side: THREE.DoubleSide });
     const cylinder = new THREE.Mesh(geometry, material);
     cylinder.rotation.y = Math.PI;
+    cylinder.castShadow = true;
     rocket.add(cylinder);
 
     const upperBody = new THREE.Mesh(new THREE.CylinderGeometry(radiusMm, radiusMm,
       upperBodyHeight, 96), shellMaterial);
     upperBody.position.y = displayAxialLengthMm / 2 + upperBodyHeight / 2;
+    upperBody.castShadow = true;
     rocket.add(upperBody);
-    const fairing = new THREE.Mesh(new THREE.SphereGeometry(radiusMm, 96, 48,
-      0, Math.PI * 2, 0, Math.PI / 2), shellMaterial);
-    fairing.scale.y = fairingHeight / radiusMm;
+    const fairingRadius = radiusMm * CZ12B.fairingDiameterM / CZ12B.diameterM;
+    const fairingProfile = [new THREE.Vector2(radiusMm, 0),
+      new THREE.Vector2(fairingRadius, fairingHeight * 0.14),
+      new THREE.Vector2(fairingRadius, fairingHeight * 0.58)];
+    for (let i = 1; i <= 32; i++) {
+      const t = i / 32;
+      fairingProfile.push(new THREE.Vector2(fairingRadius * Math.cos(t * Math.PI / 2),
+        fairingHeight * (0.58 + 0.42 * t)));
+    }
+    const fairing = new THREE.Mesh(new THREE.LatheGeometry(fairingProfile, 96), shellMaterial);
     fairing.position.y = displayAxialLengthMm / 2 + upperBodyHeight;
+    fairing.castShadow = true;
     rocket.add(fairing);
 
     const lowerBody = new THREE.Mesh(new THREE.CylinderGeometry(radiusMm, radiusMm,
-      lowerBodyHeight, 96), lowerMaterial);
-    lowerBody.position.y = -displayAxialLengthMm / 2 - lowerBodyHeight / 2;
+      lowerBodyHeight - radiusMm * 0.58, 96), lowerMaterial);
+    lowerBody.position.y = -displayAxialLengthMm / 2 - lowerBodyHeight / 2 + radiusMm * 0.29;
+    lowerBody.castShadow = true;
     rocket.add(lowerBody);
-    const nozzleHeight = Math.max(radiusMm * 0.9, axialLengthMm * 0.22);
-    const nozzle = new THREE.Mesh(new THREE.CylinderGeometry(radiusMm * 0.42,
-      radiusMm * 0.62, nozzleHeight, 64), engineMaterial);
-    nozzle.position.y = -displayAxialLengthMm / 2 - lowerBodyHeight - nozzleHeight / 2;
-    rocket.add(nozzle);
-    addStrapOnBoosters(rocket, radiusMm, displayAxialLengthMm, lowerBodyHeight,
-      shellMaterial, navyMaterial, redMaterial, engineMaterial);
+    const tail = addRocketTail(rocket, radiusMm, displayAxialLengthMm, lowerBodyHeight);
+    const flameMaterial = createExhaustMaterial();
+    const flameCoreMaterial = new THREE.MeshBasicMaterial({ color: 0xffeacc,
+      transparent: true, opacity: 0.5, depthWrite: false, blending: THREE.AdditiveBlending });
+    const flames = new THREE.Group(); flames.visible = false; rocket.add(flames);
+    const engineFlames = tail.centers.map((center) => addFlame(flames, center.x, center.y,
+      tail.nozzleBottom, radiusMm * 0.2, radiusMm * 4, flameMaterial, flameCoreMaterial));
+    const mainFlame = engineFlames[0];
+    const boosterFlames = engineFlames.slice(1);
 
     for (const y of [-displayAxialLengthMm / 2, displayAxialLengthMm / 2]) {
-      addBodyBand(rocket, radiusMm, y, radiusMm * 0.07, navyMaterial);
+      addBodyBand(rocket, radiusMm, y, radiusMm * 0.018, navyMaterial);
     }
     addBodyBand(rocket, radiusMm, displayAxialLengthMm / 2 + upperBodyHeight * 0.28,
-      radiusMm * 0.11, navyMaterial);
+      radiusMm * 0.018, navyMaterial);
     addBodyBand(rocket, radiusMm, displayAxialLengthMm / 2 + upperBodyHeight * 0.78,
-      radiusMm * 0.07, navyMaterial);
+      radiusMm * 0.018, navyMaterial);
     addBodyBand(rocket, radiusMm, -displayAxialLengthMm / 2 - lowerBodyHeight * 0.66,
-      radiusMm * 0.09, navyMaterial);
+      radiusMm * 0.018, navyMaterial);
 
     const flagTexture = createFlagTexture();
     const flagMaterial = new THREE.MeshBasicMaterial({ map: flagTexture, transparent: true,
@@ -116,10 +169,11 @@ export function ThreeSurfaceCanvas({ manifest, textureUrl, photoUrls, useSimulat
       flagHeight, 48, 1, true, -halfFlagAngle, halfFlagAngle * 2), flagMaterial);
     flagDecal.position.y = displayAxialLengthMm / 2 + upperBodyHeight / 2;
     rocket.add(flagDecal);
-    scene.add(new THREE.HemisphereLight(0xffffff, 0x263548, 2.3));
-    const key = new THREE.DirectionalLight(0xffffff, 2.5);
-    key.position.set(radiusMm * 2, axialLengthMm, radiusMm * 2);
-    scene.add(key);
+    addRocketDetails(rocket, radiusMm, displayAxialLengthMm, upperBodyHeight, lowerBodyHeight, engineMaterial);
+    const exhaustLight = new THREE.PointLight(0xffa03a, 0, radiusMm * 12);
+    exhaustLight.position.set(0, groundY + radiusMm * 2, 0);
+    scene.add(exhaustLight);
+    const smoke = createLaunchSmoke(scene, radiusMm, groundY);
     const seamMaterial = new THREE.LineBasicMaterial({ color: 0xff5964 });
     const seamPoints = [new THREE.Vector3(0, -displayAxialLengthMm / 2, -radiusMm - 1),
       new THREE.Vector3(0, displayAxialLengthMm / 2, -radiusMm - 1)];
@@ -162,19 +216,111 @@ export function ThreeSurfaceCanvas({ manifest, textureUrl, photoUrls, useSimulat
     }
     const resize = () => {
       const width = Math.max(1, host.clientWidth); const height = Math.max(1, host.clientHeight);
-      renderer.setSize(width, height, false); camera.aspect = width / height; camera.updateProjectionMatrix();
+      // Keep CSS dimensions in sync with the viewport. The drawing buffer is
+      // scaled by devicePixelRatio; using its intrinsic size crops Retina views.
+      renderer.setSize(width, height); camera.aspect = width / height; camera.updateProjectionMatrix();
+      composer.setSize(width, height);
     };
     const observer = new ResizeObserver(resize); observer.observe(host); resize();
+    const initialCameraPosition = camera.position.clone();
+    const initialTarget = controls.target.clone();
+    focusControlRef.current = (mode) => {
+      const d = mode === 'TEXT' ? textFocusDistance : fullRocketDistance;
+      initialCameraPosition.set(mode === 'TEXT' ? 0 : d * 0.35,
+        mode === 'TEXT' ? 0 : sceneCenterY + totalHeight * 0.055, d);
+      initialTarget.set(0, mode === 'TEXT' ? 0 : sceneCenterY, 0);
+      camera.position.copy(initialCameraPosition); camera.position.y += rocket.position.y;
+      controls.target.copy(initialTarget); controls.target.y += rocket.position.y;
+      controls.update();
+    };
+    focusControlRef.current(focusMode);
+    const clock = new THREE.Clock();
+    let launchStartedAt: number | null = null;
+    let launchCompleted = false;
+    launchControlRef.current = (action) => {
+      if (action === 'START') {
+        rocket.position.set(0, 0, 0);
+        camera.position.copy(initialCameraPosition);
+        controls.target.copy(initialTarget);
+        environment.update(0, 0);
+        smoke.reset();
+        launchStartedAt = clock.getElapsedTime();
+        launchCompleted = false;
+        launchActiveRef.current = true;
+        launchElapsedRef.current = 0;
+        flames.visible = true;
+        exhaustLight.intensity = radiusMm * radiusMm * 12;
+        controls.enabled = false;
+      } else {
+        launchStartedAt = null;
+        launchCompleted = false;
+        launchActiveRef.current = false;
+        launchElapsedRef.current = 0;
+        flames.visible = false;
+        exhaustLight.intensity = 0;
+        smoke.reset();
+        rocket.position.set(0, 0, 0);
+        camera.position.copy(initialCameraPosition);
+        controls.target.copy(initialTarget);
+        controls.enabled = true;
+        controls.update();
+        environment.update(0, 0);
+      }
+    };
     let frame = 0;
-    const render = () => { controls.update(); renderer.render(scene, camera); frame = requestAnimationFrame(render); };
+    const render = () => {
+      if (launchStartedAt !== null && !launchCompleted) {
+        const elapsed = clock.getElapsedTime() - launchStartedAt;
+        launchElapsedRef.current = elapsed;
+        const { progress, ascent, complete } = launchMotion(elapsed, totalHeight);
+        environment.update(progress, ascent);
+        rocket.position.set(Math.sin(elapsed * 55) * radiusMm * 0.006 * (1 - progress),
+          ascent, 0);
+        const follow = ascent;
+        camera.position.y = initialCameraPosition.y + follow;
+        controls.target.y = initialTarget.y + follow;
+        const pulse = 1 + Math.sin(elapsed * 31) * 0.12;
+        flameMaterial.uniforms.time.value = elapsed;
+        flameMaterial.uniforms.power.value = Math.min(1, elapsed * 2);
+        mainFlame.scale.y = pulse;
+        boosterFlames.forEach((flame, index) => {
+          flame.scale.y = pulse * (0.9 + Math.sin(elapsed * 24 + index) * 0.08);
+        });
+        exhaustLight.intensity = radiusMm * radiusMm * (10 + Math.sin(elapsed * 28) * 2)
+          * Math.max(0, 1 - ascent / (radiusMm * 12));
+        smoke.update(elapsed);
+        if (complete) {
+          launchCompleted = true;
+          launchActiveRef.current = false;
+          flames.visible = false;
+          exhaustLight.intensity = 0;
+          controls.enabled = true;
+          onLaunchCompleteRef.current?.();
+        }
+      }
+      if (launchStartedAt !== null && launchCompleted) {
+        smoke.update(clock.getElapsedTime() - launchStartedAt);
+      }
+      controls.update(); composer.render(); frame = requestAnimationFrame(render);
+    };
+    if (launchActiveRef.current) {
+      launchStartedAt = clock.getElapsedTime() - launchElapsedRef.current;
+      flames.visible = true;
+      controls.enabled = false;
+    }
     render();
     return () => {
       disposed = true; cancelAnimationFrame(frame); observer.disconnect(); controls.dispose();
+      launchControlRef.current = null;
+      focusControlRef.current = null;
       rocket.traverse((object) => {
         if (object instanceof THREE.Mesh || object instanceof THREE.Line) {
           object.geometry.dispose();
         }
       });
+      environment.dispose();
+      tail.dispose();
+      smoke.dispose();
       photoLayer.traverse((object) => {
         if (object instanceof THREE.Mesh && object.material instanceof THREE.MeshBasicMaterial) {
           object.material.map?.dispose(); object.material.dispose();
@@ -182,13 +328,39 @@ export function ThreeSurfaceCanvas({ manifest, textureUrl, photoUrls, useSimulat
       });
       material.map?.dispose(); material.dispose(); shellMaterial.dispose(); lowerMaterial.dispose();
       engineMaterial.dispose(); navyMaterial.dispose(); redMaterial.dispose(); seamMaterial.dispose();
+      flameMaterial.dispose(); flameCoreMaterial.dispose();
       flagTexture.dispose(); flagMaterial.dispose();
+      contactShadowPass.dispose(); outputPass.dispose(); composer.dispose();
       renderer.dispose(); renderer.domElement.remove();
     };
-  }, [focusMode, manifest, photoUrls, showEngineeringGuides, simulationDirection, simulationText, textureUrl, useSimulationTexture]);
+  }, [manifest, photoUrls, showEngineeringGuides, simulationDirection, simulationText, textureUrl, useSimulationTexture]);
+
+  useEffect(() => { focusControlRef.current?.(focusMode); }, [focusMode]);
+
+  useEffect(() => {
+    if (launchCommand) launchControlRef.current?.(launchCommand.action);
+  }, [launchCommand]);
 
   return <div className="surface-canvas" ref={hostRef} />;
 }
+
+function addFlame(parent: THREE.Group, x: number, z: number, nozzleBottom: number,
+    radius: number, length: number, outerMaterial: THREE.Material,
+    coreMaterial: THREE.Material): THREE.Group {
+  const flame = new THREE.Group();
+  flame.position.set(x, nozzleBottom, z);
+  const outer = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius * 0.015, length, 32, 20, true), outerMaterial);
+  outer.position.y = -length / 2;
+  flame.add(outer);
+  const core = new THREE.Mesh(new THREE.ConeGeometry(radius * 0.48, length * 0.72, 24),
+    coreMaterial);
+  core.rotation.z = Math.PI;
+  core.position.y = -length * 0.36;
+  flame.add(core);
+  parent.add(flame);
+  return flame;
+}
+
 
 function photoSurfaceGeometry(manifest: SurfaceManifest, slots: SurfaceManifest['slots']): THREE.BufferGeometry {
   const positions: number[] = [];
@@ -229,53 +401,13 @@ function photoSurfaceGeometry(manifest: SurfaceManifest, slots: SurfaceManifest[
 
 function addBodyBand(rocket: THREE.Group, radiusMm: number, y: number, thickness: number,
     material: THREE.Material) {
-  const bandRadius = radiusMm + Math.max(10, radiusMm * 0.04);
+  const bandRadius = radiusMm + Math.max(2, radiusMm * 0.006);
   const band = new THREE.Mesh(new THREE.CylinderGeometry(bandRadius, bandRadius,
     thickness, 96, 1, true), material);
   band.position.y = y;
   rocket.add(band);
 }
 
-function addStrapOnBoosters(rocket: THREE.Group, radiusMm: number, axialLengthMm: number,
-    lowerBodyHeight: number, shellMaterial: THREE.Material, navyMaterial: THREE.Material,
-    redMaterial: THREE.Material, engineMaterial: THREE.Material) {
-  const boosterRadius = radiusMm * 0.34;
-  const boosterHeight = lowerBodyHeight * 0.84;
-  const noseHeight = radiusMm * 0.72;
-  const lowerBodyBottom = -axialLengthMm / 2 - lowerBodyHeight;
-  const boosterY = lowerBodyBottom + boosterHeight / 2 + radiusMm * 0.08;
-  const radialDistance = radiusMm + boosterRadius * 0.72;
-  for (let index = 0; index < 4; index += 1) {
-    const angle = index * Math.PI / 2;
-    const x = Math.sin(angle) * radialDistance;
-    const z = Math.cos(angle) * radialDistance;
-    const booster = new THREE.Mesh(new THREE.CylinderGeometry(boosterRadius, boosterRadius,
-      boosterHeight, 48), shellMaterial);
-    booster.position.set(x, boosterY, z);
-    rocket.add(booster);
-    const nose = new THREE.Mesh(new THREE.ConeGeometry(boosterRadius, noseHeight, 48), shellMaterial);
-    nose.position.set(x, boosterY + boosterHeight / 2 + noseHeight / 2, z);
-    rocket.add(nose);
-    const nozzle = new THREE.Mesh(new THREE.CylinderGeometry(boosterRadius * 0.5,
-      boosterRadius * 0.72, boosterRadius * 0.72, 40), engineMaterial);
-    nozzle.position.set(x, boosterY - boosterHeight / 2 - boosterRadius * 0.36, z);
-    rocket.add(nozzle);
-    const boosterBandRadius = boosterRadius + Math.max(6, boosterRadius * 0.055);
-    const ring = new THREE.Mesh(new THREE.CylinderGeometry(boosterBandRadius,
-      boosterBandRadius, boosterRadius * 0.22, 48, 1, true), navyMaterial);
-    ring.position.set(x, boosterY + boosterHeight * 0.28, z);
-    rocket.add(ring);
-    for (let stripe = 0; stripe < 4; stripe += 1) {
-      const marker = new THREE.Mesh(new THREE.BoxGeometry(boosterRadius * 0.34,
-        boosterHeight * 0.055, Math.max(3, boosterRadius * 0.05)), redMaterial);
-      const markerDistance = radialDistance + boosterRadius + 2;
-      marker.position.set(Math.sin(angle) * markerDistance,
-        boosterY - boosterHeight * (0.1 + stripe * 0.14), Math.cos(angle) * markerDistance);
-      marker.rotation.y = angle;
-      rocket.add(marker);
-    }
-  }
-}
 
 function createFlagTexture(): THREE.Texture {
   const canvas = document.createElement('canvas');

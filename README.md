@@ -2,7 +2,7 @@
 
 将大量照片自动排版为指定文字，并支持曲面载体预览及超大印刷文件输出的平台。
 
-P00 工程基础至 P10 运营后台与完整前端流程已经完成，下一阶段为 P11 可观测性、安全与数据治理。代码采用模块化单体架构，计算密集型任务通过独立 Worker 进程运行；在业务边界和容量要求尚未稳定前不拆分微服务。
+P00 工程基础至 P10 运营后台与完整前端流程已经完成，下一阶段为 P11 安全与数据治理。代码采用模块化单体架构，计算密集型任务通过独立 Worker 进程运行；在业务边界和容量要求尚未稳定前不拆分微服务。
 
 ## 项目文档
 
@@ -27,7 +27,6 @@ P00 工程基础至 P10 运营后台与完整前端流程已经完成，下一�
 
 | 模块 | 职责 |
 |---|---|
-| `mosaic-shared-kernel` | 跨领域共享的最小类型与领域事件契约 |
 | `mosaic-identity` | 身份、认证和权限领域 |
 | `mosaic-project` | 项目与项目成员领域 |
 | `mosaic-photoasset` | 照片资产、上传和分析元数据领域 |
@@ -69,9 +68,6 @@ make web-dev
 
 | 服务 | 地址 |
 |---|---|
-| API 健康检查 | `http://localhost:18080/actuator/health` |
-| Analysis Worker 健康检查 | `http://localhost:18081/actuator/health` |
-| Render Worker 健康检查 | `http://localhost:18082/actuator/health` |
 | 布局编辑器 | `http://localhost:15173/?projectId=<项目UUID>&layoutId=<布局UUID>` |
 | 圆柱三维预览 | `http://localhost:15173/?view=surface&projectId=<项目UUID>&layoutId=<布局UUID>` |
 | PostgreSQL | `localhost:15432` |
@@ -105,7 +101,7 @@ make restore-drill BACKUP_DIR=backups/<备份目录>
 
 Java 应用可通过环境变量覆盖默认连接信息，例如 `DB_URL`、`DB_USERNAME`、`DB_PASSWORD`、`REDIS_HOST`、`REDIS_PORT`、`RABBITMQ_HOST`、`RABBITMQ_PORT`、`S3_ENDPOINT`、`S3_PUBLIC_ENDPOINT`、`S3_ACCESS_KEY` 和 `S3_SECRET_KEY`。生产环境必须由密钥管理系统注入凭据，对象桶必须保持私有。
 
-照片上传使用 S3 预签名 URL：先调用上传初始化接口，小文件直接 PUT 到返回 URL；大文件逐片获取 URL 并上传，最后把分片 ETag 清单提交到完成接口。API 会重新校验实际 SHA-256、大小、魔数和图片尺寸，验真通过后照片才进入 `AVAILABLE`。完整契约见 [OpenAPI 说明](docs/api/openapi.yaml)。
+照片上传使用 S3 预签名 URL：先调用上传初始化接口，小文件直接 PUT 到返回 URL；大文件逐片获取 URL 并上传，最后把分片 ETag 清单提交到完成接口。API 会重新校验实际 SHA-256、大小、魔数和图片尺寸，验真通过后照片才进入 `AVAILABLE`。验真在数据库长事务外流式进行；进程异常中断后，可通过 `PHOTO_VERIFICATION_LEASE`（默认 30 分钟）调整允许重新认领的超时。complete 的单实例容量保护及真实链路压测方法见 [上传容量与压测说明](docs/photo-upload-load-test.md)，完整契约见 [OpenAPI 说明](docs/api/openapi.yaml)。
 
 异步作业通过数据库事务同时写入 `processing_job` 与 `outbox_event`，发布器收到 RabbitMQ Publisher Confirm 后才将事件标记为已发布。Worker 使用手动 ACK、消费幂等记录、有限指数退避、专用重试队列和死信队列；API 负责心跳超时接管，并通过 SSE 推送进度。业务代码通过 `JobCoordinator` 创建作业，Worker 通过 `JobHandler` 扩展具体算法。
 

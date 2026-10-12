@@ -1,73 +1,89 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { DeleteOutlined, EditOutlined, EyeOutlined, InboxOutlined, PictureOutlined, UploadOutlined } from '@ant-design/icons';
 import { App, Button, Card, Empty, Input, Modal, Popconfirm, Progress, Skeleton, Table, Tag, Upload } from 'antd';
 import type { UploadFile, UploadProps } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { OperationsApi, type PhotoAnalysisResult, type PhotoSummary } from './operationsApi';
+import { ApiRequestError, OperationsApi, type PhotoAnalysisResult, type PhotoSummary } from './operationsApi';
+import { MAX_CONCURRENT_UPLOADS, retryWithBackoff, runBoundedQueue, summarizeUploadBatch, type UploadBatchOutcome } from './uploadQueue';
 
-type QueueStatus = 'WAITING' | 'HASHING' | 'UPLOADING' | 'SUCCEEDED' | 'DUPLICATE' | 'FAILED';
+type QueueStatus = 'WAITING' | 'RECEIVING' | 'QUEUED' | 'BACKEND_UPLOADING' | 'SUCCEEDED' | 'DUPLICATE' | 'FAILED';
 type QueueItem = { uid: string; name: string; size: number; status: QueueStatus; progress: number; message?: string };
+type UploadQueueResult = { uid: string; outcome: UploadBatchOutcome; photo?: PhotoSummary };
 
 export function PhotoUploadPage({ api, projectId, photos, onChanged }: { api: OperationsApi; projectId: string; photos: PhotoSummary[]; onChanged: (photos: PhotoSummary[]) => void }) {
   const { message } = App.useApp();
   const [files, setFiles] = useState<UploadFile[]>([]);
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [running, setRunning] = useState(false);
+  const runningRef = useRef(false);
   const availablePhotos = photos.filter((photo) => photo.status === 'AVAILABLE');
   const update = (uid: string, patch: Partial<QueueItem>) => setQueue((items) => items.map((item) => item.uid === uid ? { ...item, ...patch } : item));
   const accepted = files.filter((item) => item.originFileObj).map((item) => ({ uid: item.uid, file: item.originFileObj as File }));
 
   const upload = async () => {
-    const items = accepted.map(({ uid, file }) => ({ uid, name: file.name, size: file.size, status: 'WAITING' as QueueStatus, progress: 0 }));
-    setQueue(items); setRunning(true);
-    const completed: PhotoSummary[] = [];
-    const completedUids: string[] = [];
-    for (const selected of accepted) {
-      const { uid, file } = selected;
-      let photoId = '';
-      try {
-        update(uid, { status: 'HASHING', progress: 5 });
-        const sha256 = await hash(file);
-        const contentType = supportedContentType(file);
-        const initiated = await api.initiatePhotoUpload(projectId, { filename: file.name, contentType, byteSize: file.size, sha256, authorizationGranted: true });
-        photoId = initiated.photo.id;
-        if (initiated.duplicate) {
-          update(uid, { status: 'DUPLICATE', progress: 100, message: '项目内已存在相同照片' });
-          continue;
-        }
-        update(uid, { status: 'UPLOADING', progress: 12 });
-        const parts: { partNumber: number; eTag: string }[] = [];
-        if (initiated.directUpload) {
-          await api.putPresigned(initiated.directUpload, file);
-          update(uid, { progress: 88 });
-        } else {
-          const partSize = initiated.partSize;
-          if (!partSize) throw new Error('服务端未返回分片大小');
-          for (let index = 0; index < initiated.partCount; index += 1) {
-            const partNumber = index + 1;
-            const signed = await api.presignPhotoPart(projectId, photoId, partNumber);
-            const eTag = await api.putPresigned(signed, file.slice(index * partSize, Math.min(file.size, partNumber * partSize)));
-            if (!eTag) throw new Error('对象存储未返回 ETag，无法完成分片上传');
-            parts.push({ partNumber, eTag });
-            update(uid, { progress: 12 + Math.round((partNumber / initiated.partCount) * 76) });
+    if (runningRef.current) return;
+    const selectedItems = accepted;
+    if (!selectedItems.length) return;
+    runningRef.current = true;
+    setRunning(true);
+    setQueue(selectedItems.map(({ uid, file }) => ({ uid, name: file.name, size: file.size, status: 'WAITING', progress: 0 })));
+    try {
+      const uploadOne = async ({ uid, file }: (typeof selectedItems)[number]): Promise<UploadQueueResult> => {
+        try {
+          supportedContentType(file);
+          update(uid, { status: 'RECEIVING', progress: 15, message: '正在发送到业务服务' });
+          const accepted = await retryWithBackoff(
+            () => api.relayPhotoUpload(projectId, file), capacityRetryDelay,
+            { maxAttempts: 8, baseDelayMs: 500, maxDelayMs: 5000 },
+          );
+          if (accepted.duplicate) {
+            update(uid, { status: 'DUPLICATE', progress: 100, message: '项目内已存在相同照片' });
+            return { uid, outcome: 'DUPLICATE' as UploadBatchOutcome };
           }
+          if (!accepted.taskId) throw new Error('服务端未返回上传任务');
+          update(uid, { status: 'QUEUED', progress: 55, message: '服务端已接收，等待上传' });
+          let current = accepted;
+          while (current.taskStatus !== 'SUCCEEDED' && current.taskStatus !== 'FAILED') {
+            await delay(700);
+            current = await api.relayPhotoUploadStatus(projectId, accepted.taskId);
+            update(uid, current.taskStatus === 'BACKEND_UPLOADING'
+              ? { status: 'BACKEND_UPLOADING', progress: 82, message: '服务端正在写入对象存储' }
+              : { status: 'QUEUED', progress: 60, message: current.taskStatus === 'RETRY_WAIT' ? '后端上传重试等待中' : '等待后端上传' });
+          }
+          if (current.taskStatus === 'FAILED') throw new Error(current.failureMessage ?? '后端上传失败');
+          const photo = current.photo;
+          update(uid, { status: 'SUCCEEDED', progress: 100 });
+          return { uid, outcome: 'SUCCEEDED' as UploadBatchOutcome, photo };
+        } catch (cause) {
+          update(uid, { status: 'FAILED', message: messageOf(cause) });
+          return { uid, outcome: 'FAILED' as UploadBatchOutcome };
         }
-        const result = await api.completePhotoUpload(projectId, photoId, parts);
-        completed.push(result); completedUids.push(uid); update(uid, { status: 'SUCCEEDED', progress: 100 });
-      } catch (cause) {
-        update(uid, { status: 'FAILED', message: messageOf(cause) });
-        if (photoId) await api.cancelPhotoUpload(projectId, photoId).catch(() => undefined);
+      };
+      const settled = await runBoundedQueue(selectedItems, MAX_CONCURRENT_UPLOADS, uploadOne);
+      const results = settled.map((result, index) => {
+        if (result.status === 'fulfilled') return result.value;
+        const uid = selectedItems[index].uid;
+        update(uid, { status: 'FAILED', message: messageOf(result.reason) });
+        return { uid, outcome: 'FAILED' as UploadBatchOutcome };
+      });
+      const completed = results.flatMap((result) => result.photo ? [result.photo] : []);
+      const processedUids = new Set(results.filter((result) => result.outcome !== 'FAILED').map((result) => result.uid));
+      if (completed.length) {
+        onChanged([...completed, ...photos.filter((photo) => !completed.some((item) => item.id === photo.id))]);
       }
+      setFiles((current) => current.filter((file) => !processedUids.has(file.uid)));
+      const summary = summarizeUploadBatch(results.map((result) => result.outcome));
+      if (summary.kind === 'error') void message.error(summary.content);
+      else if (summary.kind === 'warning') void message.warning(summary.content);
+      else void message.success(summary.content);
+    } finally {
+      runningRef.current = false;
+      setRunning(false);
     }
-    if (completed.length) {
-      onChanged([...completed, ...photos.filter((photo) => !completed.some((item) => item.id === photo.id))]);
-      setFiles((current) => current.filter((file) => !completedUids.includes(file.uid)));
-    }
-    setRunning(false); void message.success('批量上传处理完成');
   };
 
   const uploadProps: UploadProps = {
-    multiple: true, accept: 'image/jpeg,image/png,image/webp', fileList: files, disabled: running,
+    multiple: true, maxCount: 1000, accept: 'image/jpeg,image/png,image/webp', fileList: files, disabled: running,
     beforeUpload: () => false,
     onChange: ({ fileList }) => setFiles(fileList.filter((item) => item.originFileObj && isSupported(item.originFileObj))),
     onRemove: (file) => { setFiles((current) => current.filter((item) => item.uid !== file.uid)); return true; },
@@ -91,7 +107,7 @@ export function PhotoUploadPage({ api, projectId, photos, onChanged }: { api: Op
           <p className="ant-upload-hint">支持 JPEG、PNG、WebP</p>
         </Upload.Dragger>
         <div className="upload-confirm"><Button type="primary" icon={<UploadOutlined />} loading={running} disabled={!accepted.length} onClick={() => void upload()}>{accepted.length ? `上传 ${accepted.length} 张照片` : '选择照片后上传'}</Button></div>
-        <p className="photo-upload-note">照片处理完成后会直接用于排版。大文件自动分片，原图不会经过业务服务转发。</p>
+        <p className="photo-upload-note">单次可选择 500 或 1000 张；每张照片独立发送，服务端按固定并发上传并可在重启后继续。</p>
       </div>
     </div>
     {!!queue.length && <Table className="ops-section" rowKey="uid" columns={columns} dataSource={queue} pagination={false} />}
@@ -104,6 +120,16 @@ export function PhotoUploadPage({ api, projectId, photos, onChanged }: { api: Op
       </div> : <Empty description="还没有上传照片，选好照片后点击上传即可在这里看到" />}
     </section>
   </section>;
+}
+
+function isCapacityRejection(error: unknown): error is ApiRequestError {
+  return error instanceof ApiRequestError
+    && error.status === 429
+    && (error.code === 'PHOTO_UPLOAD_CAPACITY_EXCEEDED' || error.code === 'PHOTO_RELAY_CAPACITY_EXCEEDED');
+}
+
+function capacityRetryDelay(error: unknown): number | null {
+  return isCapacityRejection(error) ? error.retryAfterMs ?? 1000 : null;
 }
 
 function UploadedPhoto({ api, projectId, photo, onUpdated, onDeleted }: {
@@ -206,7 +232,7 @@ function UploadedPhoto({ api, projectId, photo, onUpdated, onDeleted }: {
 
 function isSupported(file: File) { return ['image/jpeg', 'image/png', 'image/webp'].includes(file.type) && file.size > 0; }
 function supportedContentType(file: File) { if (!isSupported(file)) throw new Error(`${file.name} 不是受支持的图片格式`); return file.type; }
-async function hash(file: File) { const value = await crypto.subtle.digest('SHA-256', await file.arrayBuffer()); return [...new Uint8Array(value)].map((byte) => byte.toString(16).padStart(2, '0')).join(''); }
+function delay(ms: number) { return new Promise<void>((resolve) => window.setTimeout(resolve, ms)); }
 function formatBytes(value: number) { return value < 1024 * 1024 ? `${(value / 1024).toFixed(1)} KB` : `${(value / 1024 / 1024).toFixed(1)} MB`; }
 function messageOf(cause: unknown) { return cause instanceof Error ? cause.message : '上传失败'; }
 function analysisDecision(value: string) {
@@ -216,7 +242,7 @@ function analysisReasons(value: string) {
   try { return (JSON.parse(value) as string[]).join('；'); } catch { return ''; }
 }
 function UploadStatus({ value }: { value: QueueStatus }) {
-  const copy = { WAITING: '等待', HASHING: '计算摘要', UPLOADING: '上传中', SUCCEEDED: '完成', DUPLICATE: '重复', FAILED: '失败' }[value];
+  const copy = { WAITING: '等待', RECEIVING: '接收中', QUEUED: '已排队', BACKEND_UPLOADING: '后端上传中', SUCCEEDED: '完成', DUPLICATE: '重复', FAILED: '失败' }[value];
   const color = value === 'SUCCEEDED' ? 'success' : value === 'FAILED' ? 'error' : value === 'DUPLICATE' ? 'warning' : 'processing';
   return <Tag color={color}>{copy}</Tag>;
 }

@@ -12,11 +12,6 @@
     <dependencies>
         <dependency>
             <groupId>com.pics2text</groupId>
-            <artifactId>mosaic-shared-kernel</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>com.pics2text</groupId>
             <artifactId>mosaic-photoasset</artifactId>
             <version>${project.version}</version>
         </dependency>

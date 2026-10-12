@@ -37,6 +37,7 @@ Thumbs.db
 *.key
 
 # Logs and temporary files
+/build/loadtest/
 *.log
 .tmp/
 tmp/

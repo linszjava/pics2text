@@ -22,7 +22,8 @@ public class ObjectStorageConfiguration {
                 .endpointOverride(properties.endpoint())
                 .region(Region.of(properties.region()))
                 .credentialsProvider(credentials(properties))
-                .serviceConfiguration(S3Configuration.builder().pathStyleAccessEnabled(true).build())
+                .serviceConfiguration(S3Configuration.builder()
+                    .pathStyleAccessEnabled(true).build())
                 .httpClientBuilder(UrlConnectionHttpClient.builder())
                 .build();
     }

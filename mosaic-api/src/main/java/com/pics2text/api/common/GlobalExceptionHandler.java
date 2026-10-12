@@ -21,6 +21,15 @@ public class GlobalExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
+    @ExceptionHandler(RetryableCapacityException.class)
+    public ResponseEntity<ApiError> handleRetryableCapacityException(
+            RetryableCapacityException exception,
+            HttpServletRequest request) {
+        return ResponseEntity.status(exception.status())
+                .header("Retry-After", Integer.toString(exception.retryAfterSeconds()))
+                .body(error(exception.code(), exception.getMessage(), request, List.of()));
+    }
+
     @ExceptionHandler(ApiException.class)
     public ResponseEntity<ApiError> handleApiException(
             ApiException exception,

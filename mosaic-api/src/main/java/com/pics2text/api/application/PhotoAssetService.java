@@ -7,8 +7,6 @@ import com.pics2text.api.infrastructure.persistence.PhotoAssetMapper;
 import com.pics2text.api.infrastructure.persistence.ProjectEntity;
 import com.pics2text.api.infrastructure.storage.ObjectStorageGateway;
 import com.pics2text.identity.domain.User;
-import com.pics2text.job.application.JobCoordinator;
-import com.pics2text.job.domain.JobType;
 import com.pics2text.photoasset.domain.AuthorizationStatus;
 import com.pics2text.photoasset.domain.AnalysisStatus;
 import com.pics2text.photoasset.domain.PhotoAssetStatus;
@@ -23,20 +21,21 @@ import java.time.temporal.ChronoUnit;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
 import org.springframework.http.HttpStatus;
+import org.springframework.beans.factory.annotation.Value;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
-import tools.jackson.core.JacksonException;
-import tools.jackson.databind.ObjectMapper;
 
 @Service
 public class PhotoAssetService {
+    private static final Logger log = LoggerFactory.getLogger(PhotoAssetService.class);
     private static final Pattern SHA256 = Pattern.compile("^[0-9a-fA-F]{64}$");
     private static final Set<String> CONTENT_TYPES = Set.of("image/jpeg", "image/png", "image/webp");
 
@@ -47,16 +46,19 @@ public class PhotoAssetService {
     private final ObjectKeyPolicy keyPolicy;
     private final PhotoObjectVerifier verifier;
     private final AuditService audit;
-    private final JobCoordinator jobs;
-    private final ObjectMapper objectMapper;
     private final PhotoAnalysisMapper analysisMapper;
     private final PhotoObjectDeletionService deletionService;
+    private final PhotoUploadCompletionPersistenceService completionPersistence;
+    private final PhotoUploadCompletionLimiter completionLimiter;
+    private final java.time.Duration verificationLease;
 
     public PhotoAssetService(PhotoAssetMapper mapper, ProjectAccessService access,
             ObjectStorageGateway storage, ObjectStorageProperties properties,
             ObjectKeyPolicy keyPolicy, PhotoObjectVerifier verifier, AuditService audit,
-            JobCoordinator jobs, ObjectMapper objectMapper, PhotoAnalysisMapper analysisMapper,
-            PhotoObjectDeletionService deletionService) {
+            PhotoAnalysisMapper analysisMapper, PhotoObjectDeletionService deletionService,
+            PhotoUploadCompletionPersistenceService completionPersistence,
+            PhotoUploadCompletionLimiter completionLimiter,
+            @Value("${object-storage.verification-lease:30m}") java.time.Duration verificationLease) {
         this.mapper = mapper;
         this.access = access;
         this.storage = storage;
@@ -64,10 +66,11 @@ public class PhotoAssetService {
         this.keyPolicy = keyPolicy;
         this.verifier = verifier;
         this.audit = audit;
-        this.jobs = jobs;
-        this.objectMapper = objectMapper;
         this.analysisMapper = analysisMapper;
         this.deletionService = deletionService;
+        this.completionPersistence = completionPersistence;
+        this.completionLimiter = completionLimiter;
+        this.verificationLease = verificationLease;
     }
 
     @Transactional
@@ -163,56 +166,97 @@ public class PhotoAssetService {
         return new UploadProgress(asset.getStatus(), 0, asset.getByteSize(), 0, 1, null, null);
     }
 
-    @Transactional(noRollbackFor = ApiException.class)
+    /*
+     * 学习对照（不执行）：旧 complete 整体使用 @Transactional，并在事务内调用
+     * storage.completeMultipart(...) 和 verifier.verify(...)。这会让整对象流式校验期间一直占用数据库事务。
+     * 当前实现先原子认领 VERIFYING，在事务外完成对象存储 I/O，最后只用短事务落库与写 Outbox。
+     */
     public PhotoAssetEntity complete(UUID projectId, UUID photoId,
             List<ObjectStorageGateway.CompletedUploadPart> parts) {
         User actor = access.require(projectId, ProjectPermission.UPLOAD_PHOTOS);
         PhotoAssetEntity asset = require(projectId, photoId);
         ensureUploadOwnerOrAdministrator(asset, actor);
-        ensureUploading(asset);
+        if (isCompletedUpload(asset)) return asset;
+        Instant now = Instant.now();
+        boolean resuming = PhotoAssetStatus.VERIFYING.name().equals(asset.getStatus());
+        if (resuming) {
+            if (asset.getUpdatedAt() == null || !asset.getUpdatedAt().isBefore(now.minus(verificationLease))) {
+                throw conflict("UPLOAD_VERIFICATION_IN_PROGRESS", "照片正在验真，请稍后重试");
+            }
+        } else {
+            ensureUploading(asset);
+        }
+        if (UploadMode.MULTIPART.name().equals(asset.getUploadMode())) {
+            validateParts(parts, asset.getExpectedPartCount());
+        } else if (parts != null && !parts.isEmpty()) {
+            throw bad("UPLOAD_PARTS_UNEXPECTED", "单段上传不接受分片清单");
+        }
+        try (var ignored = completionLimiter.acquire(actor.id())) {
+            UUID verificationToken = UUID.randomUUID();
+            if (mapper.claimVerification(projectId, photoId, verificationToken,
+                    now.minus(verificationLease), now) == 0) {
+                PhotoAssetEntity current = require(projectId, photoId);
+                if (isCompletedUpload(current)) return current;
+                throw conflict("UPLOAD_STATE_INVALID", "上传状态不允许完成操作");
+            }
+            return completeClaimed(asset, resuming, parts, verificationToken, actor.id());
+        }
+    }
+
+    /** Internal completion entry used only after the relay worker has durably uploaded the object. */
+    public PhotoAssetEntity completeRelayed(UUID photoId, UUID actorId) {
+        PhotoAssetEntity asset = mapper.selectById(photoId);
+        if (asset == null) throw new ApiException("PHOTO_NOT_FOUND", "照片不存在", HttpStatus.NOT_FOUND);
+        if (isCompletedUpload(asset)) return asset;
+        Instant now = Instant.now();
+        boolean resuming = PhotoAssetStatus.VERIFYING.name().equals(asset.getStatus());
+        if (!resuming) ensureUploading(asset);
+        try (var ignored = completionLimiter.acquire(actorId)) {
+            UUID token = UUID.randomUUID();
+            if (mapper.claimVerification(asset.getProjectId(), photoId, token,
+                    now.minus(verificationLease), now) == 0) {
+                PhotoAssetEntity current = mapper.selectById(photoId);
+                if (current != null && isCompletedUpload(current)) return current;
+                throw conflict("UPLOAD_VERIFICATION_IN_PROGRESS", "照片正在验真，请稍后重试");
+            }
+            return completeClaimed(asset, resuming, List.of(), token, actorId);
+        }
+    }
+
+    private PhotoAssetEntity completeClaimed(PhotoAssetEntity asset, boolean resuming,
+            List<ObjectStorageGateway.CompletedUploadPart> parts, UUID verificationToken, UUID actorId) {
         try {
             if (UploadMode.MULTIPART.name().equals(asset.getUploadMode())) {
-                validateParts(parts, asset.getExpectedPartCount());
-                storage.completeMultipart(asset.getOriginalKey(), asset.getMultipartUploadId(), parts);
-            } else if (parts != null && !parts.isEmpty()) {
-                throw bad("UPLOAD_PARTS_UNEXPECTED", "单段上传不接受分片清单");
+                if (!resuming || !storage.exists(asset.getOriginalKey())) {
+                    asset.setStatus(PhotoAssetStatus.UPLOADING.name());
+                    storage.completeMultipart(asset.getOriginalKey(), asset.getMultipartUploadId(), parts);
+                }
             }
             asset.setStatus(PhotoAssetStatus.VERIFYING.name());
-            asset.setUpdatedAt(Instant.now());
-            mapper.updateById(asset);
             var result = verifier.verify(asset.getOriginalKey(), asset.getByteSize(), asset.getSha256());
             if (!asset.getDeclaredContentType().equals(result.contentType())) {
                 throw new ApiException("PHOTO_CONTENT_TYPE_MISMATCH", "文件格式与声明的 Content-Type 不一致",
                         HttpStatus.UNPROCESSABLE_ENTITY);
             }
-            PhotoAssetEntity duplicate = mapper.findAvailableDuplicate(projectId, asset.getSha256());
-            if (duplicate != null && !duplicate.getId().equals(asset.getId())) {
-                storage.delete(asset.getOriginalKey());
-                asset.setStatus(PhotoAssetStatus.DUPLICATE.name());
-                asset.setDuplicateOf(duplicate.getId());
-                asset.setFailureCode("PHOTO_DUPLICATE");
-                asset.setFailureMessage("项目中已存在相同照片");
-            } else {
-                asset.setDetectedContentType(result.contentType());
-                asset.setWidth(result.width());
-                asset.setHeight(result.height());
-                asset.setStatus(PhotoAssetStatus.AVAILABLE.name());
-                asset.setAvailableAt(Instant.now());
+            PhotoAssetEntity completed = completionPersistence.finalizeVerified(
+                    asset.getId(), verificationToken, result, actorId);
+            if (PhotoAssetStatus.DUPLICATE.name().equals(completed.getStatus())) {
+                cleanupDuplicateObject(completed);
             }
-            asset.setUpdatedAt(Instant.now());
-            mapper.updateById(asset);
-            if (PhotoAssetStatus.AVAILABLE.name().equals(asset.getStatus())) {
-                enqueueAnalysis(asset, actor.id());
-            }
-            audit.record(actor.id(), "PHOTO_UPLOAD_COMPLETE", "PHOTO_ASSET", photoId.toString(), true);
-            return asset;
+            return completed;
         } catch (ApiException exception) {
-            fail(asset, exception.code(), exception.getMessage(), true);
-            audit.record(actor.id(), "PHOTO_UPLOAD_COMPLETE", "PHOTO_ASSET", photoId.toString(), false);
+            if (!failClaimedVerification(asset, verificationToken, exception.code(), exception.getMessage(), actorId)) {
+                PhotoAssetEntity current = require(asset.getProjectId(), asset.getId());
+                if (isCompletedUpload(current)) return current;
+            }
             throw exception;
         } catch (RuntimeException exception) {
-            fail(asset, "PHOTO_STORAGE_ERROR", "对象存储操作失败", true);
-            audit.record(actor.id(), "PHOTO_UPLOAD_COMPLETE", "PHOTO_ASSET", photoId.toString(), false);
+            log.warn("照片完成处理失败 photoId={}", asset.getId(), exception);
+            if (!failClaimedVerification(asset, verificationToken, "PHOTO_STORAGE_ERROR",
+                    "对象存储操作失败", actorId)) {
+                PhotoAssetEntity current = require(asset.getProjectId(), asset.getId());
+                if (isCompletedUpload(current)) return current;
+            }
             throw new ApiException("PHOTO_STORAGE_ERROR", "对象存储操作失败", HttpStatus.BAD_GATEWAY, exception);
         }
     }
@@ -324,13 +368,22 @@ public class PhotoAssetService {
         audit.record(actor.id(), "PHOTO_DELETE", "PHOTO_ASSET", photoId.toString(), true);
     }
 
-    @Transactional
     public void cancelUpload(UUID projectId, UUID photoId) {
         User actor = access.require(projectId, ProjectPermission.UPLOAD_PHOTOS);
         PhotoAssetEntity asset = require(projectId, photoId);
         ensureUploadOwnerOrAdministrator(asset, actor);
+        if (PhotoAssetStatus.FAILED.name().equals(asset.getStatus())
+                && "UPLOAD_CANCELLED".equals(asset.getFailureCode())) return;
         ensureUploading(asset);
-        fail(asset, "UPLOAD_CANCELLED", "上传已取消", true);
+        if (mapper.cancelUploading(projectId, photoId, Instant.now()) == 0) {
+            throw conflict("UPLOAD_STATE_INVALID", "上传状态已变化，无法取消");
+        }
+        try {
+            cleanupStorage(asset);
+            mapper.markObjectsDeleted(photoId, Instant.now());
+        } catch (RuntimeException ignored) {
+            // 定时清理会重试 objects_deleted_at 为空的失败上传。
+        }
         audit.record(actor.id(), "PHOTO_UPLOAD_CANCEL", "PHOTO_ASSET", photoId.toString(), true);
     }
 
@@ -346,13 +399,31 @@ public class PhotoAssetService {
         if (numbers.size() != expected) throw bad("UPLOAD_PARTS_INCOMPLETE", "分片清单不完整");
     }
 
-    private void enqueueAnalysis(PhotoAssetEntity asset, UUID actorId) {
+    private boolean isCompletedUpload(PhotoAssetEntity asset) {
+        return PhotoAssetStatus.AVAILABLE.name().equals(asset.getStatus())
+                || PhotoAssetStatus.DUPLICATE.name().equals(asset.getStatus());
+    }
+
+    private boolean failClaimedVerification(PhotoAssetEntity asset, UUID verificationToken,
+            String code, String message, UUID actorId) {
+        if (!completionPersistence.failVerification(asset.getId(), verificationToken, code, message, actorId)) {
+            return false;
+        }
         try {
-            String payload = objectMapper.writeValueAsString(Map.of("photoId", asset.getId()));
-            jobs.enqueue(asset.getProjectId(), actorId, JobType.PHOTO_ANALYSIS,
-                    "PHOTO_ASSET", asset.getId(), payload, 5, true);
-        } catch (JacksonException exception) {
-            throw new IllegalStateException("无法创建照片分析任务", exception);
+            cleanupStorage(asset);
+            mapper.markObjectsDeleted(asset.getId(), Instant.now());
+        } catch (RuntimeException ignored) {
+            // 定时清理会重试 objects_deleted_at 为空的失败上传。
+        }
+        return true;
+    }
+
+    private void cleanupDuplicateObject(PhotoAssetEntity asset) {
+        try {
+            cleanupStorage(asset);
+            mapper.markObjectsDeleted(asset.getId(), Instant.now());
+        } catch (RuntimeException ignored) {
+            // 定时清理会重试 objects_deleted_at 为空的重复照片。
         }
     }
 

@@ -19,7 +19,7 @@
 - 火箭表面展开、禁印区域和三维预览数据；
 - 低清预览、超大图分块渲染和印刷文件交付；
 - 异步任务、失败重试、任务恢复和进度通知；
-- 日志、指标、链路追踪、审计、备份和部署能力。
+- 业务日志、审计、备份和部署能力。
 
 正式版本暂不包含：
 
@@ -50,7 +50,6 @@ mosaic-render-worker
 
 ```text
 mosaic-platform/
-├── mosaic-shared-kernel/
 ├── mosaic-identity/
 ├── mosaic-project/
 ├── mosaic-photoasset/
@@ -82,7 +81,6 @@ mosaic-platform/
 | 前端状态 | TanStack Query、Zustand |
 | 数据库测试 | Testcontainers PostgreSQL |
 | 测试 | JUnit 5、AssertJ、Mockito、ArchUnit、Playwright |
-| 可观测性 | Actuator、Micrometer、OpenTelemetry、Prometheus、Grafana、Loki、Tempo |
 | 交付 | Docker、Docker Compose；生产编排按部署环境决定 |
 
 依赖的精确版本必须集中定义在父 `pom.xml`，不得由子模块各自声明版本。升级依赖时需要记录兼容性验证结果。
@@ -416,17 +414,12 @@ mosaic-platform/
 
 完成文档：`docs/progress/P10-frontend-and-operations.md`
 
-### P11：可观测性、安全与数据治理
+### P11：安全与数据治理
 
 目标：达到可运营、可审计和可排障要求。
 
 需要完成：
 
-- OpenTelemetry链路和关联ID；
-- API、队列、Worker、数据库和对象存储指标；
-- Grafana看板和告警规则；
-- 日志集中检索；
-- JVM堆与原生RSS内存监控；
 - 数据保留、撤回、删除和备份策略；
 - 数据库与对象存储恢复演练；
 - 凭证轮换和最小权限；
@@ -436,11 +429,10 @@ mosaic-platform/
 验收标准：
 
 - 可以从任务ID定位到API请求、消息和Worker日志；
-- 队列积压、任务失败和内存异常可以告警；
 - 完成至少一次恢复演练；
 - 高风险安全问题均已关闭或有明确处置计划。
 
-完成文档：`docs/progress/P11-observability-and-security.md`
+完成文档：`docs/progress/P11-security-and-data-governance.md`
 
 ### P12：性能验证、上线与交付
 

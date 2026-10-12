@@ -121,6 +121,23 @@ export interface InitiatedPhotoUpload {
   photo: PhotoSummary; duplicate: boolean; directUpload: PresignedRequest | null;
   partSize: number | null; partCount: number; expiresAt: string;
 }
+export interface RelayPhotoUpload {
+  taskId: string | null; taskStatus: 'RECEIVED' | 'QUEUED' | 'BACKEND_UPLOADING' | 'RETRY_WAIT' | 'SUCCEEDED' | 'FAILED';
+  attemptCount: number; maxAttempts: number; failureCode: string | null; failureMessage: string | null;
+  duplicate: boolean; photo: PhotoSummary;
+}
+
+export class ApiRequestError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code: string | null,
+    readonly retryAfterMs: number | null,
+  ) {
+    super(message);
+    this.name = 'ApiRequestError';
+  }
+}
 
 export class OperationsApi {
   me(): Promise<AuthenticatedUser> { return this.request('/api/v1/auth/me'); }
@@ -163,6 +180,15 @@ export class OperationsApi {
     const response = await fetch(request.url, { method: 'PUT', headers, body });
     if (!response.ok) throw new Error(`对象存储上传失败：${response.status}`);
     return response.headers.get('etag');
+  }
+  async relayPhotoUpload(projectId: string, file: File): Promise<RelayPhotoUpload> {
+    const body = new FormData(); body.append('file', file, file.name);
+    return this.handle(await fetch(`/api/v1/projects/${projectId}/photos/relay-uploads`, {
+      method: 'POST', headers: { Authorization: `Bearer ${authToken()}` }, body,
+    }));
+  }
+  relayPhotoUploadStatus(projectId: string, taskId: string): Promise<RelayPhotoUpload> {
+    return this.request(`/api/v1/projects/${projectId}/photos/relay-uploads/${taskId}`);
   }
   photoPreview(projectId: string, photoId: string): Promise<PhotoPreview> {
     return this.request(`/api/v1/projects/${projectId}/photos/${photoId}/preview-urls`, { method: 'POST' });
@@ -277,12 +303,21 @@ export class OperationsApi {
     const response = await fetch(path, { ...init, headers: {
       'Content-Type': 'application/json', Authorization: `Bearer ${authToken()}`, ...init.headers,
     } });
+    return this.handle(response);
+  }
+  private async handle<T>(response: Response): Promise<T> {
     if (response.status === 401) {
       clearSession(); redirectToLogin();
     }
     if (!response.ok) {
-      const body = await response.json().catch(() => ({})) as { message?: string };
-      throw new Error(body.message ?? `请求失败：${response.status}`);
+      const body = await response.json().catch(() => ({})) as { code?: string; message?: string };
+      const retryAfterSeconds = Number(response.headers.get('Retry-After'));
+      throw new ApiRequestError(
+        body.message ?? `请求失败：${response.status}`,
+        response.status,
+        body.code ?? null,
+        Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0 ? retryAfterSeconds * 1000 : null,
+      );
     }
     return response.status === 204 ? undefined as T : response.json() as Promise<T>;
   }

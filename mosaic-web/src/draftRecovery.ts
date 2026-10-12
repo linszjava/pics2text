@@ -31,5 +31,13 @@ export class DraftRecovery {
     }
   }
 
+  loadIfEditable(editable: boolean): PendingDraft | null {
+    if (!editable) {
+      this.clear();
+      return null;
+    }
+    return this.load();
+  }
+
   clear(): void { this.store.removeItem(this.key); }
 }

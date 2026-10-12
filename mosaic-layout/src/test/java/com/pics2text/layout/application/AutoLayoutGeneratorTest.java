@@ -52,6 +52,15 @@ class AutoLayoutGeneratorTest {
     }
 
     @Test
+    void reuseCoversEveryCandidateBeforeFillingRemainingSlots() {
+        AutoLayoutResult result = generator.generate(slots(1_938), photos(510),
+                request(19, true, 10_000, 64, 1_000));
+        assertThat(result.assignments()).hasSize(1_938);
+        assertThat(result.uniquePhotoCount()).isEqualTo(510);
+        assertThat(result.assignments().stream().map(LayoutAssignment::photoId).distinct()).hasSize(510);
+    }
+
+    @Test
     void insufficientUniquePhotosFailExplicitly() {
         assertThatThrownBy(() -> generator.generate(slots(11), photos(10),
                 request(1, false, 1, 16, 0)))

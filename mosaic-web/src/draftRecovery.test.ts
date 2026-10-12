@@ -25,4 +25,16 @@ describe('DraftRecovery', () => {
     store.setItem('draft', '{bad');
     expect(new DraftRecovery(store, 'draft').load()).toBeNull();
   });
+
+  it('discards an unsaved batch when the layout is read-only', () => {
+    const store = new MemoryStore();
+    const recovery = new DraftRecovery(store, 'draft');
+    const draft: PendingDraft = { clientBatchId: 'batch', expectedLockVersion: 2,
+      commands: [{ type: 'REPLACE', slotIndex: 497, photoId: 'photo-1' }], savedAt: 'now' };
+    recovery.save(draft);
+    expect(recovery.loadIfEditable(false)).toBeNull();
+    expect(store.values.has('draft')).toBe(false);
+    recovery.save(draft);
+    expect(recovery.loadIfEditable(true)).toEqual(draft);
+  });
 });

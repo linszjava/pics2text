@@ -40,7 +40,8 @@ class PhotoPreviewServiceTest {
     @BeforeEach
     void setUp() {
         service = new PhotoAssetService(mapper, access, storage, null, null, null,
-                audit, null, null, null, null);
+                audit, null, null, null, new PhotoUploadCompletionLimiter(4, 2, java.time.Duration.ofSeconds(1)),
+                java.time.Duration.ofMinutes(30));
         projectId = UUID.randomUUID();
         photoId = UUID.randomUUID();
         photo = new PhotoAssetEntity();

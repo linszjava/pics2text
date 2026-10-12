@@ -24,14 +24,36 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.RequestPart;
+import org.springframework.http.MediaType;
+import org.springframework.web.multipart.MultipartFile;
+import com.pics2text.api.application.PhotoRelayUploadService;
+import com.pics2text.api.infrastructure.persistence.PhotoRelayUploadTaskEntity;
 
 @RestController
 @RequestMapping("/api/v1/projects/{projectId}/photos")
 public class PhotoAssetController {
     private final PhotoAssetService service;
+    private final PhotoRelayUploadService relay;
 
-    public PhotoAssetController(PhotoAssetService service) {
+    public PhotoAssetController(PhotoAssetService service, PhotoRelayUploadService relay) {
         this.service = service;
+        this.relay = relay;
+    }
+
+    @PostMapping(value="/relay-uploads", consumes=MediaType.MULTIPART_FORM_DATA_VALUE)
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    public RelayUploadResponse relayUpload(@PathVariable UUID projectId,
+            @RequestPart("file") MultipartFile file,
+            @RequestParam(defaultValue="true") boolean authorizationGranted) {
+        var result=relay.receive(projectId,file,authorizationGranted);
+        return RelayUploadResponse.from(result);
+    }
+
+    @GetMapping("/relay-uploads/{taskId}")
+    public RelayUploadResponse relayStatus(@PathVariable UUID projectId,@PathVariable UUID taskId) {
+        var result=relay.get(projectId,taskId);
+        return RelayUploadResponse.from(result.task(),result.photo(),false);
     }
 
     @PostMapping("/uploads")
@@ -145,6 +167,18 @@ public class PhotoAssetController {
     }
 
     public record PhotoPreviewResponse(PresignedResponse thumbnail, PresignedResponse preview) {}
+
+    public record RelayUploadResponse(UUID taskId, String taskStatus, int attemptCount, int maxAttempts,
+            String failureCode, String failureMessage, boolean duplicate, PhotoResponse photo) {
+        static RelayUploadResponse from(PhotoRelayUploadService.Result r) {
+            return r.duplicate()?new RelayUploadResponse(null,"SUCCEEDED",0,0,null,null,true,PhotoResponse.from(r.photo()))
+                    :from(r.task(),r.photo(),false);
+        }
+        static RelayUploadResponse from(PhotoRelayUploadTaskEntity t,PhotoAssetEntity p,boolean duplicate) {
+            return new RelayUploadResponse(t.getId(),t.getStatus(),t.getAttemptCount(),t.getMaxAttempts(),
+                    t.getFailureCode(),t.getFailureMessage(),duplicate,PhotoResponse.from(p));
+        }
+    }
 
     public record PhotoResponse(UUID id, UUID projectId, UUID uploaderId, String originalFilename,
             String declaredContentType, String detectedContentType, long byteSize, Integer width,

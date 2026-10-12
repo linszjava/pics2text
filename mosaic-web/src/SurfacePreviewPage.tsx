@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowLeftOutlined } from '@ant-design/icons';
-import { Alert, Button, Segmented, Space, Tag, Typography } from 'antd';
+import { ArrowLeftOutlined, RocketOutlined, ReloadOutlined, LeftOutlined, RightOutlined } from '@ant-design/icons';
+import { Button, Segmented, Space, Tag, Typography } from 'antd';
 import { LayoutApi } from './api';
 import { OperationsApi } from './operationsApi';
 import { authToken } from './auth';
@@ -17,7 +17,10 @@ export function SurfacePreviewPage() {
   const [data, setData] = useState<SurfacePreviewData | null>(null);
   const [photoUrls, setPhotoUrls] = useState(new Map<string, string>());
   const [error, setError] = useState('');
+  const [inspectorOpen, setInspectorOpen] = useState(true);
   const [focusMode, setFocusMode] = useState<'ROCKET' | 'TEXT'>('TEXT');
+  const [launchState, setLaunchState] = useState<'IDLE' | 'PLAYING' | 'DONE'>('IDLE');
+  const [launchCommand, setLaunchCommand] = useState<{ id: number; action: 'START' | 'RESET' }>();
   const [textDesign, setTextDesign] = useState<{ text: string; direction: 'HORIZONTAL' | 'VERTICAL' } | null>(null);
   const manifest = useMemo(() => data?.manifest, [data?.manifestHash]);
   useEffect(() => {
@@ -63,16 +66,46 @@ export function SurfacePreviewPage() {
       <Typography.Text type="secondary">清单 {data.manifestHash.slice(0, 12)}…</Typography.Text></div>
       <Space className="toolbar"><Button href="?view=dashboard">工作台</Button>
         <Button type="primary" icon={<ArrowLeftOutlined />} href={`?view=editor&projectId=${projectId}&layoutId=${layoutId}`}>返回二维编辑器</Button></Space></header>
-    <section className="surface-workspace"><ThreeSurfaceCanvas manifest={m} textureUrl={data.textureUrl} photoUrls={photoUrls}
+    <section className={`surface-workspace surface-workspace-overlay${inspectorOpen ? '' : ' inspector-collapsed'}`}><ThreeSurfaceCanvas manifest={m} textureUrl={data.textureUrl} photoUrls={photoUrls}
       useSimulationTexture={!data.textureUrl && photoUrls.size === 0} simulationText={textDesign?.text ?? ''}
-      simulationDirection={textDesign?.direction ?? 'VERTICAL'} focusMode={focusMode} />
-      <aside className="inspector"><Typography.Title level={5}>火箭贴装模拟</Typography.Title>
-        <Space wrap><Tag color="blue">{textDesign?.direction === 'HORIZONTAL' ? '横向排版' : '竖向排版'}</Tag><Tag color="processing">中部舱段</Tag><Tag>参数化模型</Tag></Space>
-        <Typography.Paragraph type="secondary">“{textDesign?.text ?? '文字方案'}”使用当前项目保存的排版方案；模型用于辅助判断贴装位置。</Typography.Paragraph>
+      simulationDirection={textDesign?.direction ?? 'VERTICAL'} focusMode={focusMode}
+      launchCommand={launchCommand} onLaunchComplete={() => setLaunchState('DONE')} />
+      <Button className="surface-inspector-toggle" icon={inspectorOpen ? <RightOutlined /> : <LeftOutlined />}
+        aria-label={inspectorOpen ? '收起火箭贴装模拟' : '展开火箭贴装模拟'}
+        title={inspectorOpen ? '收起火箭贴装模拟' : '展开火箭贴装模拟'}
+        aria-expanded={inspectorOpen} aria-controls="surface-inspector"
+        onClick={() => setInspectorOpen((open) => !open)}>
+        {!inspectorOpen && '贴装设置'}
+      </Button>
+      <aside id="surface-inspector" className="inspector surface-inspector" inert={!inspectorOpen}
+        aria-hidden={!inspectorOpen}><Typography.Title level={5}>火箭贴装模拟</Typography.Title>
+        <Space wrap><Tag color="blue">{textDesign?.direction === 'HORIZONTAL' ? '横向排版' : '竖向排版'}</Tag><Tag color="processing">中部舱段</Tag><Tag>长征十二号乙 · 外观参考</Tag></Space>
+        <Typography.Paragraph type="secondary">“{textDesign?.text ?? '文字方案'}”保留当前项目排版。参考长征十二号乙的单芯两级、九发动机构型，按当前贴装直径缩放；细节为近似表达，非官方模型或施工依据。</Typography.Paragraph>
+        <Typography.Link href="https://www.spacechina.com/n25/n2014789/n2414549/c4623381/content.html" target="_blank" rel="noreferrer">型号依据：航天科技集团首飞资料</Typography.Link>
         <Typography.Paragraph className="surface-view-control"><Typography.Text>观察范围</Typography.Text>
-          <Segmented block value={focusMode} onChange={(value) => setFocusMode(value as 'ROCKET' | 'TEXT')}
+          <Segmented block value={focusMode} disabled={launchState === 'PLAYING'}
+            onChange={(value) => setFocusMode(value as 'ROCKET' | 'TEXT')}
             options={[{ label: '文字特写', value: 'TEXT' }, { label: '整箭', value: 'ROCKET' }]} />
         </Typography.Paragraph>
+        <div className="surface-launch-control">
+          <Typography.Text strong>发射演示</Typography.Text>
+          <Typography.Text type="secondary">仅用于展示视觉效果，不改变作品或贴装坐标。</Typography.Text>
+          <Space wrap>
+            <Button type="primary" icon={<RocketOutlined />} loading={launchState === 'PLAYING'}
+              onClick={() => {
+                setFocusMode('ROCKET');
+                setLaunchState('PLAYING');
+                setLaunchCommand((previous) => ({ id: (previous?.id ?? 0) + 1, action: 'START' }));
+              }}>
+              {launchState === 'DONE' ? '重播点火' : '点火启动'}
+            </Button>
+            <Button icon={<ReloadOutlined />} disabled={launchState === 'IDLE'}
+              onClick={() => {
+                setLaunchState('IDLE');
+                setLaunchCommand((previous) => ({ id: (previous?.id ?? 0) + 1, action: 'RESET' }));
+              }}>复位</Button>
+          </Space>
+        </div>
         <Typography.Title level={5}>物理参数</Typography.Title><dl>
         <dt>直径</dt><dd>{m.surface.diameterMm.toFixed(2)} mm</dd>
         <dt>周长</dt><dd>{m.surface.circumferenceMm.toFixed(2)} mm</dd>
@@ -82,8 +115,6 @@ export function SurfacePreviewPage() {
         <dt>X 比例</dt><dd>{m.mapping.scaleXmmPerPx.toFixed(6)} mm/px</dd>
         <dt>Y 比例</dt><dd>{m.mapping.scaleYmmPerPx.toFixed(6)} mm/px</dd>
         <dt>槽位</dt><dd>{m.slots.length}</dd><dt>区域</dt><dd>{m.regions.length}</dd>
-      </dl><Typography.Paragraph type="secondary">拖动旋转，滚轮缩放；使用“文字特写”和“整箭”切换观察范围。</Typography.Paragraph>
-      <Alert type="info" showIcon title={photoUrls.size > 0 ? `正在显示 ${photoUrls.size} 张真实照片的曲面贴图，可滚轮放大查看。`
-        : data.textureUrl ? '正在加载逐张照片，当前显示排版概览。' : '照片纹理正在生成，目前显示所选文字的模拟效果。'} /></aside></section>
+      </dl><Typography.Paragraph type="secondary">拖动旋转，滚轮缩放；使用“文字特写”和“整箭”切换观察范围。</Typography.Paragraph></aside></section>
   </main>;
 }

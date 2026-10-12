@@ -20,7 +20,6 @@
     <description>照片文字马赛克与大型印刷渲染平台</description>
 
     <modules>
-        <module>mosaic-shared-kernel</module>
         <module>mosaic-identity</module>
         <module>mosaic-project</module>
         <module>mosaic-photoasset</module>

@@ -39,6 +39,7 @@ public class PhotoAssetEntity {
     private Instant reviewedAt;
     private String reviewNote;
     private Instant uploadExpiresAt;
+    private UUID verificationToken;
     private Instant retentionUntil;
     private Instant availableAt;
     private Instant withdrawnAt;
@@ -109,6 +110,8 @@ public class PhotoAssetEntity {
     public void setReviewNote(String reviewNote) { this.reviewNote = reviewNote; }
     public Instant getUploadExpiresAt() { return uploadExpiresAt; }
     public void setUploadExpiresAt(Instant uploadExpiresAt) { this.uploadExpiresAt = uploadExpiresAt; }
+    public UUID getVerificationToken() { return verificationToken; }
+    public void setVerificationToken(UUID verificationToken) { this.verificationToken = verificationToken; }
     public Instant getRetentionUntil() { return retentionUntil; }
     public void setRetentionUntil(Instant retentionUntil) { this.retentionUntil = retentionUntil; }
     public Instant getAvailableAt() { return availableAt; }

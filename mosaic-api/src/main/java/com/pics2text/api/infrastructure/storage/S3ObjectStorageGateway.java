@@ -8,6 +8,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.LinkedHashMap;
 import java.util.Comparator;
+import java.nio.file.Path;
+import software.amazon.awssdk.core.sync.RequestBody;
 import org.springframework.stereotype.Component;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.AbortMultipartUploadRequest;
@@ -93,6 +95,17 @@ public class S3ObjectStorageGateway implements ObjectStorageGateway {
     }
 
     @Override
+    public boolean exists(String key) {
+        try {
+            head(key);
+            return true;
+        } catch (S3Exception exception) {
+            if (exception.statusCode() == 404) return false;
+            throw exception;
+        }
+    }
+
+    @Override
     public StoredObject head(String key) {
         var response = client.headObject(HeadObjectRequest.builder().bucket(properties.bucket()).key(key).build());
         return new StoredObject(response.contentLength(), response.contentType());
@@ -123,6 +136,16 @@ public class S3ObjectStorageGateway implements ObjectStorageGateway {
     @Override
     public void delete(String key) {
         client.deleteObject(DeleteObjectRequest.builder().bucket(properties.bucket()).key(key).build());
+    }
+
+    @Override
+    public void putFile(String key, String contentType, long contentLength, Path path) {
+        client.putObject(PutObjectRequest.builder()
+            .bucket(properties.bucket())
+            .key(key)
+                .contentType(contentType)
+            .contentLength(contentLength)
+            .build(), RequestBody.fromFile(path));
     }
 
     private PresignedRequest map(software.amazon.awssdk.awscore.presigner.PresignedRequest signed) {

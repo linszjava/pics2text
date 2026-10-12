@@ -2,6 +2,7 @@ package com.pics2text.api.infrastructure.storage;
 
 import java.io.InputStream;
 import java.net.URI;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 
@@ -12,11 +13,13 @@ public interface ObjectStorageGateway {
     PresignedRequest presignPart(String key, String uploadId, int partNumber);
     void completeMultipart(String key, String uploadId, List<CompletedUploadPart> parts);
     void abortMultipart(String key, String uploadId);
+    boolean exists(String key);
     StoredObject head(String key);
     List<UploadedPart> listParts(String key, String uploadId);
     InputStream open(String key);
     PresignedRequest presignGet(String key, String downloadName);
     void delete(String key);
+    void putFile(String key, String contentType, long contentLength, Path path);
 
     record PresignedRequest(URI url, String method, Map<String, List<String>> headers) {}
     record CompletedUploadPart(int partNumber, String eTag) {}

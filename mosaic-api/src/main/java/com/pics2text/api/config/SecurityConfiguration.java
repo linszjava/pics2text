@@ -11,6 +11,11 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 @Configuration
 public class SecurityConfiguration implements WebMvcConfigurer {
+    private final PhotoRelayAdmissionInterceptor relayAdmission;
+
+    public SecurityConfiguration(PhotoRelayAdmissionInterceptor relayAdmission) {
+        this.relayAdmission = relayAdmission;
+    }
 
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
@@ -20,6 +25,8 @@ public class SecurityConfiguration implements WebMvcConfigurer {
                         "/api/v1/auth/login",
                         "/api/v1/auth/register",
                         "/api/v1/auth/bootstrap");
+        registry.addInterceptor(relayAdmission)
+                .addPathPatterns("/api/v1/projects/*/photos/relay-uploads");
     }
 
     @Bean

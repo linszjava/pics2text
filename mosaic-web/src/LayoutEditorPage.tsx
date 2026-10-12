@@ -37,7 +37,6 @@ export function LayoutEditorPage() {
   const [error, setError] = useState('');
   const [locateValue, setLocateValue] = useState('');
   const [libraryPhotos, setLibraryPhotos] = useState<PhotoSummary[]>([]);
-  const [newerLayout, setNewerLayout] = useState<EditableLayout | null>(null);
   const [replaceOpen, setReplaceOpen] = useState(false);
   const [photoSearch, setPhotoSearch] = useState('');
   const [unlocking, setUnlocking] = useState(false);
@@ -48,6 +47,13 @@ export function LayoutEditorPage() {
     layoutRef.current = value;
     setLayoutState(value);
   }, []);
+
+  const discardPending = useCallback(() => {
+    pendingRef.current = [];
+    replayDraftRef.current = null;
+    recovery.clear();
+    setPendingCount(0);
+  }, [recovery]);
 
   const loadPhotoUrls = useCallback(async (items: Assignment[]) => {
     const missing = [...new Set(items.map((item) => item.photoId))]
@@ -79,13 +85,22 @@ export function LayoutEditorPage() {
 
   const reload = useCallback(async () => {
     const value = await api.getLayout(projectId, layoutId);
+    if (value.state !== 'DRAFT') {
+      discardPending();
+      setError('');
+    }
     setLayout(value);
     setStatus(value.state === 'DRAFT' ? '所有修改已保存' : `布局已${value.state === 'LOCKED' ? '锁定' : '发布'}`);
-  }, [api, layoutId, projectId, setLayout]);
+    return value;
+  }, [api, discardPending, layoutId, projectId, setLayout]);
 
   const flush = useCallback(async () => {
     if (savingRef.current || (!replayDraftRef.current && pendingRef.current.length === 0)
         || !layoutRef.current) return;
+    if (layoutRef.current.state !== 'DRAFT') {
+      discardPending();
+      return;
+    }
     savingRef.current = true;
     const draft = replayDraftRef.current ?? {
       clientBatchId: crypto.randomUUID(),
@@ -97,6 +112,7 @@ export function LayoutEditorPage() {
     recovery.save(draft);
     setPendingCount(draft.commands.length + pendingRef.current.length);
     setStatus(`正在保存 ${draft.commands.length} 项修改…`);
+    let retryAutomatically = true;
     try {
       const result = await api.edit(projectId, layoutId, draft.expectedLockVersion,
         draft.clientBatchId, draft.commands);
@@ -107,25 +123,36 @@ export function LayoutEditorPage() {
       setStatus(`已保存为版本 ${result.version.versionNumber}`);
       if (lastViewport.current) await loadViewport(lastViewport.current);
     } catch (cause) {
+      if (layoutRef.current?.state !== 'DRAFT') {
+        discardPending();
+        setError('');
+        return;
+      }
       const failure = cause as ApiFailure;
       if (failure.status === 409) {
         setError('检测到并发修改或布局状态变化，未覆盖服务端数据。请检查后重新操作。');
-        pendingRef.current = [];
-        replayDraftRef.current = null;
-        setPendingCount(0);
-        recovery.clear();
+        discardPending();
         await reload().catch(() => undefined);
       } else {
+        retryAutomatically = false;
+        const latest = await api.getLayout(projectId, layoutId).catch(() => null);
+        if (latest?.state && latest.state !== 'DRAFT') {
+          setLayout(latest);
+          discardPending();
+          setStatus(`布局已${latest.state === 'LOCKED' ? '锁定' : '发布'}`);
+          setError('');
+          return;
+        }
         setPendingCount(draft.commands.length + pendingRef.current.length);
         setError(`自动保存失败，修改已保留在本机：${messageOf(cause)}`);
       }
     } finally {
       savingRef.current = false;
-      if (replayDraftRef.current || pendingRef.current.length > 0) {
+      if (retryAutomatically && (replayDraftRef.current || pendingRef.current.length > 0)) {
         window.setTimeout(() => void flush(), AUTOSAVE_DELAY_MS);
       }
     }
-  }, [api, layoutId, loadViewport, projectId, recovery, reload, setLayout]);
+  }, [api, discardPending, layoutId, loadViewport, projectId, recovery, reload, setLayout]);
 
   const enqueue = useCallback((command: EditCommand) => {
     if (layoutRef.current?.state !== 'DRAFT') return;
@@ -137,8 +164,8 @@ export function LayoutEditorPage() {
 
   useEffect(() => {
     if (!projectId || !layoutId || !token) return;
-    void reload().then(() => {
-      const draft = recovery.load();
+    void reload().then((loadedLayout) => {
+      const draft = recovery.loadIfEditable(loadedLayout.state === 'DRAFT');
       if (draft?.commands.length) {
         replayDraftRef.current = draft;
         setPendingCount(draft.commands.length);
@@ -151,13 +178,6 @@ export function LayoutEditorPage() {
     if (!projectId || !token) return;
     void photoApi.photos(projectId).then(setLibraryPhotos).catch((cause) => setError(messageOf(cause)));
   }, [photoApi, projectId, token]);
-  useEffect(() => {
-    if (!layout || !projectId) return;
-    void photoApi.layouts(projectId).then((values) => setNewerLayout(
-      values.find((item) => item.id !== layout.id && item.maskId === layout.maskId && item.state === 'DRAFT') ?? null,
-    )).catch(() => undefined);
-  }, [layout?.id, layout?.maskId, photoApi, projectId]);
-
   useEffect(() => {
     if (!pendingCount || savingRef.current) return;
     const timer = window.setTimeout(() => void flush(), AUTOSAVE_DELAY_MS);
@@ -255,8 +275,6 @@ export function LayoutEditorPage() {
         onSelect={select} onViewport={debounceViewport(loadViewport)} />
       <aside className="inspector">
         <Typography.Title level={5}>槽位编辑</Typography.Title>
-        {newerLayout && layout.state !== 'DRAFT' && <Alert type="warning" showIcon title="正在查看旧版排版"
-          description={<a href={`?view=editor&projectId=${projectId}&layoutId=${newerLayout.id}`}>打开使用新照片生成的可编辑排版</a>} />}
         {!selected && <Typography.Paragraph type="secondary">点击画布中的照片开始编辑。</Typography.Paragraph>}
         {selected && <>
           <dl><dt>槽位</dt><dd>{selected.slotIndex}</dd><dt>照片</dt><dd title={selectedPhoto?.originalFilename ?? selected.photoId}>{selectedPhoto?.originalFilename ?? selected.photoId}</dd></dl>
@@ -289,6 +307,7 @@ export function LayoutEditorPage() {
       {matchingPhotos.length === 60 && <p className="photo-picker-hint">仅显示前 60 张，请输入名称缩小范围。</p>}
     </Modal>
     <footer className="statusbar"><Typography.Text>{status}{pendingCount ? `（待保存 ${pendingCount}）` : ''}</Typography.Text>
+      {editable && pendingCount > 0 && error && <Button size="small" onClick={() => void flush()}>重试保存</Button>}
       <span>{error && <Alert type="error" showIcon title={error} />}</span>
       <Typography.Text type="secondary">当前视口 {assignments.length} 个槽位</Typography.Text></footer>
   </main>;

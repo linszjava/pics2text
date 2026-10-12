@@ -1,6 +1,5 @@
 package com.pics2text.api.application;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -10,7 +9,6 @@ import com.pics2text.api.infrastructure.persistence.PhotoAssetEntity;
 import com.pics2text.api.infrastructure.storage.ObjectStorageGateway;
 import com.pics2text.photoasset.infrastructure.persistence.PhotoAnalysisMapper;
 import com.pics2text.photoasset.infrastructure.persistence.PhotoVariantEntity;
-import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -24,13 +22,11 @@ import org.mockito.junit.jupiter.MockitoExtension;
 class PhotoObjectDeletionServiceTest {
     @Mock ObjectStorageGateway storage;
     @Mock PhotoAnalysisMapper analysisMapper;
-    private SimpleMeterRegistry registry;
     private PhotoObjectDeletionService service;
 
     @BeforeEach
     void setUp() {
-        registry = new SimpleMeterRegistry();
-        service = new PhotoObjectDeletionService(storage, analysisMapper, registry);
+        service = new PhotoObjectDeletionService(storage, analysisMapper);
     }
 
     @Test
@@ -51,8 +47,6 @@ class PhotoObjectDeletionServiceTest {
         verify(storage).delete("photos/thumb");
         verify(storage).delete("photos/preview");
         verify(storage).delete("photos/variant");
-        assertEquals(1, counter("success"));
-        assertEquals(0, counter("failure"));
     }
 
     @Test
@@ -67,11 +61,10 @@ class PhotoObjectDeletionServiceTest {
         verify(storage).abortMultipart("photos/original", "upload-1");
         verify(storage, never()).delete("photos/original");
         verify(analysisMapper, never()).listVariants(photoId);
-        assertEquals(1, counter("success"));
     }
 
     @Test
-    void recordsFailureAndKeepsExceptionForRetry() {
+    void keepsExceptionForRetry() {
         UUID photoId = UUID.randomUUID();
         PhotoAssetEntity asset = asset(photoId, "WITHDRAWN");
         asset.setOriginalKey("photos/original");
@@ -81,12 +74,6 @@ class PhotoObjectDeletionServiceTest {
 
         assertThrows(RuntimeException.class, () -> service.deleteAll(asset));
 
-        assertEquals(0, counter("success"));
-        assertEquals(1, counter("failure"));
-    }
-
-    private double counter(String result) {
-        return registry.get("pics2text.photo.cleanup.operations").tag("result", result).counter().count();
     }
 
     private PhotoAssetEntity asset(UUID id, String status) {

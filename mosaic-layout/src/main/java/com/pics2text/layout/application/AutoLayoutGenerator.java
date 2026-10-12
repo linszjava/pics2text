@@ -15,7 +15,7 @@ import java.util.TreeSet;
 import java.util.UUID;
 
 public final class AutoLayoutGenerator {
-    public static final String ALGORITHM_VERSION = "bucket-greedy-swap-v1";
+    public static final String ALGORITHM_VERSION = "bucket-greedy-coverage-swap-v2";
     public static final String SCORING_VERSION = "quality-lab-crop-adjacent-v1";
     public static final int MAX_SLOTS = 250_000;
     public static final int MAX_CANDIDATES = 250_000;
@@ -54,9 +54,14 @@ public final class AutoLayoutGenerator {
         order.sort(Comparator.<Integer, Boolean>comparing(index -> !slots.get(index).edge())
                 .thenComparingDouble(index -> slots.get(index).coverage())
                 .thenComparingInt(index -> slots.get(index).slotIndex()));
+        // When there is room for every candidate, give each photo one slot before
+        // allowing reuse. Later swaps preserve these usage counts.
+        boolean coverAllCandidates = slots.size() >= candidates.size();
+        int assigned = 0;
         for (int slotPosition : order) {
             LayoutTargetSlot slot = slots.get(slotPosition);
-            List<Integer> window = candidateWindow(slot, candidates, buckets, useCounts, request);
+            List<Integer> window = candidateWindow(slot, candidates, buckets, useCounts, request,
+                    coverAllCandidates && assigned < candidates.size());
             int best = -1;
             double bestScore = Double.POSITIVE_INFINITY;
             long bestTie = Long.MAX_VALUE;
@@ -77,6 +82,7 @@ public final class AutoLayoutGenerator {
             useCounts[best]++;
             UUID group = candidates.get(best).duplicateGroupId();
             if (group != null) duplicateGroupCounts.merge(group, 1, Integer::sum);
+            assigned++;
         }
 
         double initial = averageObjective(slots, candidates, chosen, positionIndex,
@@ -117,32 +123,34 @@ public final class AutoLayoutGenerator {
     }
 
     private List<Integer> candidateWindow(LayoutTargetSlot slot, List<LayoutPhotoCandidate> candidates,
-            List<List<Integer>> buckets, int[] useCounts, AutoLayoutRequest request) {
+            List<List<Integer>> buckets, int[] useCounts, AutoLayoutRequest request, boolean unusedOnly) {
         int limit = Math.min(request.candidateWindow(), candidates.size());
         double targetL = targetL(slot, request);
         int targetBucket = Math.min(BUCKET_COUNT - 1, Math.max(0, (int) (targetL / 256d * BUCKET_COUNT)));
         LinkedHashSet<Integer> selected = new LinkedHashSet<>(limit);
         for (int radius = 0; radius < BUCKET_COUNT && selected.size() < limit; radius++) {
-            addBucket(selected, buckets, targetBucket - radius, slot, useCounts, request, limit);
-            if (radius > 0) addBucket(selected, buckets, targetBucket + radius, slot, useCounts, request, limit);
+            addBucket(selected, buckets, targetBucket - radius, slot, useCounts, request, limit, unusedOnly);
+            if (radius > 0) addBucket(selected, buckets, targetBucket + radius, slot, useCounts, request, limit, unusedOnly);
         }
         if (selected.isEmpty()) {
             for (int index = 0; index < candidates.size() && selected.size() < limit; index++) {
-                if (useCounts[index] < reuseLimit(request)) selected.add(index);
+                if (useCounts[index] < reuseLimit(request) && (!unusedOnly || useCounts[index] == 0)) selected.add(index);
             }
         }
         return List.copyOf(selected);
     }
 
     private void addBucket(Set<Integer> selected, List<List<Integer>> buckets, int bucket,
-            LayoutTargetSlot slot, int[] useCounts, AutoLayoutRequest request, int limit) {
+            LayoutTargetSlot slot, int[] useCounts, AutoLayoutRequest request, int limit, boolean unusedOnly) {
         if (bucket < 0 || bucket >= BUCKET_COUNT || selected.size() >= limit) return;
         List<Integer> members = buckets.get(bucket);
         if (members.isEmpty()) return;
         int start = Math.floorMod((int) mix(request.randomSeed() ^ slot.slotIndex() ^ bucket), members.size());
         for (int offset = 0; offset < members.size() && selected.size() < limit; offset++) {
             int candidate = members.get((start + offset) % members.size());
-            if (useCounts[candidate] < reuseLimit(request)) selected.add(candidate);
+            if (useCounts[candidate] < reuseLimit(request) && (!unusedOnly || useCounts[candidate] == 0)) {
+                selected.add(candidate);
+            }
         }
     }
 

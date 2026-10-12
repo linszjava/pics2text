@@ -5,8 +5,6 @@ import com.pics2text.job.application.JobHandler;
 import com.pics2text.job.application.PermanentJobException;
 import com.pics2text.job.messaging.JobMessage;
 import com.rabbitmq.client.Channel;
-import io.micrometer.observation.Observation;
-import io.micrometer.observation.ObservationRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
@@ -27,20 +25,14 @@ public class JobMessageListener {
     private final JobCoordinator coordinator;
     private final List<JobHandler> handlers;
     private final ObjectMapper objectMapper;
-    private final JobWorkerMetrics metrics;
-    private final ObservationRegistry observationRegistry;
     private final String workerId;
     private final String consumerName;
 
     public JobMessageListener(JobCoordinator coordinator, List<JobHandler> handlers, ObjectMapper objectMapper,
-            JobWorkerMetrics metrics,
-            ObservationRegistry observationRegistry,
             org.springframework.core.env.Environment environment) {
         this.coordinator = coordinator;
         this.handlers = handlers;
         this.objectMapper = objectMapper;
-        this.metrics = metrics;
-        this.observationRegistry = observationRegistry;
         this.workerId = environment.getProperty("jobs.worker.id",
                 environment.getProperty("spring.application.name", "worker") + "-" + ProcessHandle.current().pid());
         this.consumerName = environment.getProperty("jobs.worker.consumer-name",
@@ -54,55 +46,36 @@ public class JobMessageListener {
         try {
             message = objectMapper.readValue(new String(raw.getBody(), StandardCharsets.UTF_8), JobMessage.class);
         } catch (Exception exception) {
-            metrics.malformed();
             log.error("无法解析作业消息，将进入死信队列", exception);
             channel.basicReject(tag, false);
             return;
         }
 
-        metrics.received(message.type());
-        enrichCurrentObservation(message);
         try (MDC.MDCCloseable ignoredJob = MDC.putCloseable("jobId", message.jobId().toString());
              MDC.MDCCloseable ignoredProject = MDC.putCloseable("projectId", message.projectId().toString());
              MDC.MDCCloseable ignoredEvent = MDC.putCloseable("eventId", message.eventId().toString())) {
             JobCoordinator.BeginResult begin = coordinator.begin(message, consumerName, workerId);
             if (begin.status() != JobCoordinator.BeginStatus.STARTED) {
-                metrics.skipped(message.type(), begin.status().name().toLowerCase(java.util.Locale.ROOT));
                 channel.basicAck(tag, false);
                 return;
             }
-            long startedNanos = System.nanoTime();
             try {
                 JobHandler handler = handlers.stream().filter(candidate -> candidate.supports(message.type()))
                         .findFirst().orElseThrow(() -> new PermanentJobException("没有可处理该类型的处理器：" + message.type()));
                 String result = handler.execute(begin.context());
                 if (begin.context().cancellationRequested()) {
                     coordinator.cancel(message, consumerName, workerId);
-                    metrics.completed(message.type(), "cancelled", startedNanos);
                 } else {
                     coordinator.succeed(message, consumerName, workerId, result);
-                    metrics.completed(message.type(), "succeeded", startedNanos);
                 }
             } catch (Throwable failure) {
                 coordinator.fail(message, consumerName, workerId, failure);
-                metrics.completed(message.type(), "failed", startedNanos);
             }
             channel.basicAck(tag, false);
         } catch (Exception infrastructureFailure) {
-            metrics.infrastructureFailure(message.type());
             log.error("处理作业消息时基础设施异常，消息重新入队 jobId={}", message.jobId(), infrastructureFailure);
             channel.basicNack(tag, false, true);
         }
     }
 
-    private void enrichCurrentObservation(JobMessage message) {
-        Observation observation = observationRegistry.getCurrentObservation();
-        if (observation == null) {
-            return;
-        }
-        observation.lowCardinalityKeyValue("job.type", message.type().name());
-        observation.highCardinalityKeyValue("job.id", message.jobId().toString());
-        observation.highCardinalityKeyValue("project.id", message.projectId().toString());
-        observation.highCardinalityKeyValue("event.id", message.eventId().toString());
-    }
 }
